@@ -4,10 +4,11 @@ const SESSION_COOKIE = "pcc_session";
 const PUBLIC_PATHS = ["/login", "/register"];
 
 /**
- * Edge middleware: fast redirects for unauthenticated page loads and CSRF origin checks
- * for mutating API calls. Real authentication/authorization happens server-side in services.
+ * Request proxy (Next.js 16's name for middleware): fast redirects for unauthenticated page loads
+ * and CSRF origin checks for mutating API calls. Real authentication/authorization happens
+ * server-side in services.
  */
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   if (pathname.startsWith("/api/")) {

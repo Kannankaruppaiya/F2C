@@ -12,8 +12,8 @@ const nextConfig: NextConfig = {
   typedRoutes: false,
   serverExternalPackages: ["bcryptjs"],
   experimental: {
-    // Middleware buffers request bodies; keep its cap aligned with MAX_UPLOAD_MB (+ multipart overhead).
-    middlewareClientMaxBodySize: `${Number(process.env.MAX_UPLOAD_MB ?? 25) + 1}mb`,
+    // The proxy (middleware) buffers request bodies; keep its cap aligned with MAX_UPLOAD_MB (+ multipart overhead).
+    proxyClientMaxBodySize: `${Number(process.env.MAX_UPLOAD_MB ?? 25) + 1}mb`,
   },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];

@@ -1,14 +1,16 @@
-import { dirname } from "path";
-import { fileURLToPath } from "url";
-import { FlatCompat } from "@eslint/eslintrc";
-
-const compat = new FlatCompat({ baseDirectory: dirname(fileURLToPath(import.meta.url)) });
+import nextVitals from "eslint-config-next/core-web-vitals";
+import nextTs from "eslint-config-next/typescript";
 
 const config = [
-  { ignores: [".next/**", "node_modules/**", "next-env.d.ts"] },
-  ...compat.extends("next/core-web-vitals", "next/typescript"),
+  { ignores: [".next/**", "node_modules/**", "next-env.d.ts", "storage/**"] },
+  ...nextVitals,
+  ...nextTs,
   {
     rules: {
+      // New in eslint-config-next 16 (React Compiler guidance). The flagged pattern — closing a dialog
+      // or resetting local UI state in an effect after a server action result — is intentional here;
+      // adopting the rule is a separate refactor, not part of the framework upgrade.
+      "react-hooks/set-state-in-effect": "off",
       "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", destructuredArrayIgnorePattern: "^_" }],
     },
   },

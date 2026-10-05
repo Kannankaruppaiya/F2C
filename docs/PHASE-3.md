@@ -136,6 +136,24 @@ Client users:
   - `e2e/walkthrough.mjs`: the Phase 1 flow, unchanged.
   - `e2e/phase3.mjs`: spoofed-upload rejection, upload v1/v2, signed download, approval request, CR draft → estimate → send, client requests changes and approves, client cannot see internal docs or upload (403), client approves the CR, confirm-first implementation tasks, document audit trail.
 
+## Framework upgrade: Next.js 15.5 → 16
+
+Running the browser walkthroughs against a **production** build (`next start`) showed server-action form submissions sometimes never completing on the client. The server finished the action and returned the full response, but the router never applied it and the button stayed on "Saving…" indefinitely.
+
+Investigation:
+- Failure rate was 10–35% per submission in headless Chromium. Every run against the dev server passed.
+- It reproduced on the **untouched Phase 1 commit**, so it was pre-existing, not a Phase 3 regression.
+- It did not depend on response timing, compression, the middleware body cap, or excluding server actions from middleware.
+- The same app on **Next.js 16.3.8** had 0 failures in 50 attempts.
+
+The upgrade (separate commit) needed no application code changes:
+- `src/middleware.ts` → `src/proxy.ts` (function renamed `proxy`).
+- `experimental.middlewareClientMaxBodySize` → `proxyClientMaxBodySize`.
+- ESLint moved to `eslint-config-next`'s native flat config. Its new React Compiler rule `react-hooks/set-state-in-effect` is turned off (documented in `eslint.config.mjs`).
+- One render-time mutation in the command palette was fixed.
+
+Also found during this investigation: viewport prefetching of ~40 nav and table links per page rendered the authenticated layout for each link and starved the DB pool in production. Link prefetching is now off by default (`src/components/ui/link.tsx`).
+
 ## Known limitations
 - **No client invitation UI yet.** Approvals need a client portal user for the project's client; the demo seed creates them. User management is planned with RBAC hardening (Phase 7).
 - **Email is not implemented.** Notifications are in-app only. There are no due-date reminders.

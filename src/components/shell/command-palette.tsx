@@ -88,7 +88,8 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
 
   if (!open) return null;
 
-  let index = -1;
+  // Flat index of each group's first hit, for keyboard navigation across groups.
+  const groupOffsets = shown.map((_, gi) => shown.slice(0, gi).reduce((n, g) => n + g.hits.length, 0));
   return (
     <div className="fixed inset-0 z-[60] flex items-start justify-center bg-zinc-950/30 px-4 pt-[12vh]" onMouseDown={onClose}>
       <div
@@ -129,12 +130,11 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           {!loading && q.trim().length >= 2 && flat.length === 0 && (
             <p className="px-4 py-6 text-center text-xs text-ink-3">No results for “{q.trim()}”.</p>
           )}
-          {shown.map((g) => (
+          {shown.map((g, gi) => (
             <div key={g.label} className="py-1">
               <p className="px-4 pt-1 pb-1 text-2xs font-medium uppercase tracking-wide text-ink-4">{g.label}</p>
-              {g.hits.map((h) => {
-                index += 1;
-                const i = index;
+              {g.hits.map((h, hi) => {
+                const i = groupOffsets[gi]! + hi;
                 return (
                   <button
                     key={g.label + h.id}

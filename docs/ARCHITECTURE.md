@@ -17,7 +17,7 @@ service layer that owns authorization and business rules, and thin transport lay
 
 | Concern | Choice | Notes |
 |---|---|---|
-| Framework | Next.js 15 (App Router), React 19, TypeScript (strict) | Server components by default; client components only for interaction |
+| Framework | Next.js 16 (App Router), React 19, TypeScript (strict) | Server components by default; client components only for interaction |
 | Styling | Tailwind CSS 4 | Design tokens in `src/app/globals.css` |
 | Database | PostgreSQL 16 | |
 | ORM | Prisma 6 | Migrations in `prisma/migrations` |
@@ -212,7 +212,7 @@ POST /ai/project-summary, /ai/requirement-analysis, /ai/proposal, /ai/risk-analy
 ```
 
 Mutations from the browser are protected against CSRF by `SameSite=Lax` cookies plus an
-`Origin`/`Host` check in `middleware.ts` for every non-GET `/api` request. Server actions
+`Origin`/`Host` check in `proxy.ts` (Next.js 16's name for middleware) for every non-GET `/api` request. Server actions
 get Next.js' built-in origin check.
 
 ---

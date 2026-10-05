@@ -14,7 +14,7 @@ and is still due, whether you're profitable, and what to do next.
 
 ## Stack
 
-Next.js 15 (App Router) · React 19 · TypeScript (strict) · Tailwind CSS 4 · PostgreSQL 16 · Prisma 6 · Zod · Vitest
+Next.js 16 (App Router) · React 19 · TypeScript (strict) · Tailwind CSS 4 · PostgreSQL 16 · Prisma 6 · Zod · Vitest
 
 It's built as a modular monolith. Read **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for the schema,
 entity relationships, routes, permission model, API structure and delivery phases.
@@ -91,7 +91,7 @@ local driver, `STORAGE_SIGNING_SECRET` (32+ characters) is required. Other setti
 - **Health engine.** It scores deadline risk, schedule slip, overdue and blocked tasks, effort overrun against earned value,
   critical bugs, overdue or pending approvals, unapproved scope changes and overdue invoices. It returns
   `HEALTHY / AT_RISK / CRITICAL` with human-readable reasons.
-- **CSRF:** SameSite=Lax cookies, an Origin check on mutating `/api` requests in middleware, and Next.js's built-in origin check for server actions.
+- **CSRF:** SameSite=Lax cookies, an Origin check on mutating `/api` requests in `src/proxy.ts`, and Next.js's built-in origin check for server actions.
 
 ## Project layout
 
