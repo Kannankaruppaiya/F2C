@@ -1,0 +1,1105 @@
+// Project Command Center — relational schema.
+// Every business table carries workspace_id for tenant isolation (see docs/ARCHITECTURE.md).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────────── Enums ─────────────────────────────
+
+enum Role {
+  OWNER
+  ADMIN
+  PROJECT_MANAGER
+  DEVELOPER
+  DESIGNER
+  QA
+  FINANCE
+  CLIENT
+}
+
+enum ClientStatus {
+  LEAD
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum ProjectStatus {
+  LEAD
+  PLANNING
+  ACTIVE
+  ON_HOLD
+  CLIENT_REVIEW
+  COMPLETED
+  MAINTENANCE
+  CANCELLED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum PhaseStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  BLOCKED
+  REVIEW
+  COMPLETED
+}
+
+enum FeatureStatus {
+  BACKLOG
+  PLANNED
+  IN_DEVELOPMENT
+  REVIEW
+  TESTING
+  COMPLETED
+  REJECTED
+}
+
+enum TaskStatus {
+  BACKLOG
+  TODO
+  IN_PROGRESS
+  BLOCKED
+  REVIEW
+  TESTING
+  DONE
+}
+
+enum BugSeverity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum BugStatus {
+  OPEN
+  IN_PROGRESS
+  FIXED
+  RETEST
+  REOPENED
+  CLOSED
+}
+
+enum Environment {
+  DEVELOPMENT
+  STAGING
+  PRODUCTION
+}
+
+enum DocumentCategory {
+  REQUIREMENTS
+  PROPOSAL
+  SCOPE
+  UI_UX
+  TECHNICAL
+  API
+  DATABASE
+  QA
+  CLIENT_APPROVALS
+  INVOICES
+  DEPLOYMENT
+  HANDOVER
+}
+
+enum DocumentStatus {
+  DRAFT
+  INTERNAL_REVIEW
+  SENT_TO_CLIENT
+  APPROVED
+  REJECTED
+  ARCHIVED
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+}
+
+enum ChangeRequestStatus {
+  DRAFT
+  PENDING_INTERNAL_REVIEW
+  PENDING_CLIENT_APPROVAL
+  APPROVED
+  REJECTED
+  IMPLEMENTED
+  CANCELLED
+}
+
+enum MilestoneStatus {
+  PENDING
+  INVOICED
+  PAID
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum PaymentMethod {
+  BANK_TRANSFER
+  UPI
+  CARD
+  CASH
+  CHEQUE
+  PAYPAL
+  STRIPE
+  OTHER
+}
+
+enum ExpenseCategory {
+  HOSTING
+  DOMAIN
+  API
+  SOFTWARE
+  FREELANCER
+  INFRASTRUCTURE
+  OTHER
+}
+
+enum DeploymentStatus {
+  PENDING
+  DEPLOYING
+  SUCCESSFUL
+  FAILED
+  ROLLED_BACK
+}
+
+enum HandoverItemStatus {
+  PENDING
+  COMPLETED
+  SKIPPED
+}
+
+enum SupportStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_FOR_CLIENT
+  RESOLVED
+  CLOSED
+}
+
+enum CalendarEventType {
+  MEETING
+  MILESTONE
+  OTHER
+}
+
+// ───────────────────────────── Identity & tenancy ─────────────────────────────
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  passwordHash String    @map("password_hash")
+  avatarColor  String?   @map("avatar_color")
+  lastLoginAt  DateTime? @map("last_login_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  memberships     WorkspaceMember[]
+  sessions        Session[]
+  projectMembers  ProjectMember[]
+  managedProjects Project[]         @relation("ProjectManager")
+  assignedTasks   Task[]            @relation("TaskAssignee")
+  createdTasks    Task[]            @relation("TaskCreator")
+  assignedBugs    Bug[]             @relation("BugAssignee")
+  reportedBugs    Bug[]             @relation("BugReporter")
+  taskComments    TaskComment[]
+  timeEntries     TimeEntry[]
+  activities      Activity[]
+  notifications   Notification[]
+  uploadedVersions DocumentVersion[]
+  deployments     Deployment[]
+  subtasks        Subtask[]
+
+  @@map("users")
+}
+
+model Session {
+  id          String   @id @default(cuid())
+  tokenHash   String   @unique @map("token_hash")
+  userId      String   @map("user_id")
+  workspaceId String?  @map("workspace_id")
+  userAgent   String?  @map("user_agent")
+  ipAddress   String?  @map("ip_address")
+  expiresAt   DateTime @map("expires_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  lastSeenAt  DateTime @default(now()) @map("last_seen_at")
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model Workspace {
+  id                   String   @id @default(cuid())
+  name                 String
+  slug                 String   @unique
+  currency             String   @default("INR")
+  locale               String   @default("en-IN")
+  timezone             String   @default("Asia/Kolkata")
+  defaultTaxRate       Decimal  @default(18) @map("default_tax_rate") @db.Decimal(5, 2)
+  // Internal cost of one hour of effort, used for actual-cost / profitability.
+  defaultHourlyCost    Decimal  @default(0) @map("default_hourly_cost") @db.Decimal(14, 2)
+  invoicePrefix        String   @default("INV") @map("invoice_prefix")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  members         WorkspaceMember[]
+  sessions        Session[]
+  counters        WorkspaceCounter[]
+  clients         Client[]
+  clientContacts  ClientContact[]
+  projects        Project[]
+  projectMembers  ProjectMember[]
+  phases          Phase[]
+  features        Feature[]
+  tasks           Task[]
+  subtasks        Subtask[]
+  taskComments    TaskComment[]
+  bugs            Bug[]
+  documents       Document[]
+  documentVersions DocumentVersion[]
+  approvals       Approval[]
+  changeRequests  ChangeRequest[]
+  milestones      Milestone[]
+  invoices        Invoice[]
+  invoiceItems    InvoiceItem[]
+  payments        Payment[]
+  expenses        Expense[]
+  timeEntries     TimeEntry[]
+  deployments     Deployment[]
+  handoverItems   HandoverItem[]
+  maintenancePlans MaintenancePlan[]
+  supportRequests SupportRequest[]
+  calendarEvents  CalendarEvent[]
+  activities      Activity[]
+  notifications   Notification[]
+  acceptanceCriteria AcceptanceCriterion[]
+
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  userId      String   @map("user_id")
+  role        Role
+  // Internal cost per hour for this member; falls back to workspace default.
+  hourlyCost  Decimal? @map("hourly_cost") @db.Decimal(14, 2)
+  // For CLIENT role: which client this user represents.
+  clientId    String?  @map("client_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  client    Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+  @@map("workspace_members")
+}
+
+// Per-workspace sequential numbering for human-readable keys (INV-024, CR-014, BUG-031).
+model WorkspaceCounter {
+  workspaceId String @map("workspace_id")
+  key         String
+  value       Int    @default(0)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, key])
+  @@map("workspace_counters")
+}
+
+// ───────────────────────────── Clients ─────────────────────────────
+
+model Client {
+  id          String       @id @default(cuid())
+  workspaceId String       @map("workspace_id")
+  name        String
+  company     String?
+  email       String?
+  phone       String?
+  website     String?
+  country     String?
+  address     String?
+  notes       String?
+  status      ClientStatus @default(ACTIVE)
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  deletedAt   DateTime?    @map("deleted_at")
+
+  workspace      Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contacts       ClientContact[]
+  projects       Project[]
+  members        WorkspaceMember[]
+  approvals      Approval[]
+  changeRequests ChangeRequest[]
+  invoices       Invoice[]
+
+  @@index([workspaceId, status])
+  @@index([workspaceId, name])
+  @@map("clients")
+}
+
+model ClientContact {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  clientId    String   @map("client_id")
+  name        String
+  role        String?
+  email       String?
+  phone       String?
+  isPrimary   Boolean  @default(false) @map("is_primary")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  client    Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId])
+  @@map("client_contacts")
+}
+
+// ───────────────────────────── Projects ─────────────────────────────
+
+model Project {
+  id               String        @id @default(cuid())
+  workspaceId      String        @map("workspace_id")
+  clientId         String        @map("client_id")
+  code             String
+  name             String
+  description      String?
+  projectType      String?       @map("project_type")
+  status           ProjectStatus @default(PLANNING)
+  priority         Priority      @default(MEDIUM)
+  startDate        DateTime?     @map("start_date") @db.Date
+  dueDate          DateTime?     @map("due_date") @db.Date
+  completedAt      DateTime?     @map("completed_at")
+  contractValue    Decimal       @default(0) @map("contract_value") @db.Decimal(14, 2)
+  paymentTerms     String?       @map("payment_terms")
+  repositoryUrl    String?       @map("repository_url")
+  productionUrl    String?       @map("production_url")
+  stagingUrl       String?       @map("staging_url")
+  hostingProvider  String?       @map("hosting_provider")
+  scopeSummary     String?       @map("scope_summary")
+  outOfScope       String?       @map("out_of_scope")
+  projectManagerId String?       @map("project_manager_id")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+  deletedAt        DateTime?     @map("deleted_at")
+
+  workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  client          Client           @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  projectManager  User?            @relation("ProjectManager", fields: [projectManagerId], references: [id], onDelete: SetNull)
+  members         ProjectMember[]
+  phases          Phase[]
+  features        Feature[]
+  tasks           Task[]
+  bugs            Bug[]
+  documents       Document[]
+  approvals       Approval[]
+  changeRequests  ChangeRequest[]
+  milestones      Milestone[]
+  invoices        Invoice[]
+  expenses        Expense[]
+  timeEntries     TimeEntry[]
+  deployments     Deployment[]
+  handoverItems   HandoverItem[]
+  maintenancePlan MaintenancePlan?
+  calendarEvents  CalendarEvent[]
+  activities      Activity[]
+
+  @@unique([workspaceId, code])
+  @@index([workspaceId, status])
+  @@index([workspaceId, clientId])
+  @@index([workspaceId, dueDate])
+  @@map("projects")
+}
+
+model ProjectMember {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  projectId   String   @map("project_id")
+  userId      String   @map("user_id")
+  title       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@index([userId])
+  @@map("project_members")
+}
+
+model Phase {
+  id               String      @id @default(cuid())
+  workspaceId      String      @map("workspace_id")
+  projectId        String      @map("project_id")
+  name             String
+  description      String?
+  position         Int
+  status           PhaseStatus @default(NOT_STARTED)
+  startDate        DateTime?   @map("start_date") @db.Date
+  endDate          DateTime?   @map("end_date") @db.Date
+  budget           Decimal?    @db.Decimal(14, 2)
+  estimatedHours   Decimal     @default(0) @map("estimated_hours") @db.Decimal(8, 2)
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
+  deletedAt        DateTime?   @map("deleted_at")
+
+  workspace    Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project      Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  features     Feature[]
+  tasks        Task[]
+  bugs         Bug[]
+  documents    Document[]
+  milestones   Milestone[]
+  timeEntries  TimeEntry[]
+  dependencies PhaseDependency[] @relation("PhaseDependent")
+  dependents   PhaseDependency[] @relation("PhaseDependsOn")
+
+  @@index([projectId, position])
+  @@index([workspaceId])
+  @@map("phases")
+}
+
+model PhaseDependency {
+  phaseId     String @map("phase_id")
+  dependsOnId String @map("depends_on_id")
+
+  phase     Phase @relation("PhaseDependent", fields: [phaseId], references: [id], onDelete: Cascade)
+  dependsOn Phase @relation("PhaseDependsOn", fields: [dependsOnId], references: [id], onDelete: Cascade)
+
+  @@id([phaseId, dependsOnId])
+  @@map("phase_dependencies")
+}
+
+model Feature {
+  id             String        @id @default(cuid())
+  workspaceId    String        @map("workspace_id")
+  projectId      String        @map("project_id")
+  phaseId        String        @map("phase_id")
+  name           String
+  description    String?
+  priority       Priority      @default(MEDIUM)
+  status         FeatureStatus @default(BACKLOG)
+  estimatedHours Decimal       @default(0) @map("estimated_hours") @db.Decimal(8, 2)
+  position       Int           @default(0)
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  deletedAt      DateTime?     @map("deleted_at")
+
+  workspace          Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project            Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  phase              Phase                 @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  tasks              Task[]
+  bugs               Bug[]
+  documents          Document[]
+  approvals          Approval[]
+  timeEntries        TimeEntry[]
+  acceptanceCriteria AcceptanceCriterion[]
+  dependencies       FeatureDependency[]   @relation("FeatureDependent")
+  dependents         FeatureDependency[]   @relation("FeatureDependsOn")
+
+  @@index([projectId, status])
+  @@index([phaseId])
+  @@index([workspaceId])
+  @@map("features")
+}
+
+model AcceptanceCriterion {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  featureId   String   @map("feature_id")
+  text        String
+  isMet       Boolean  @default(false) @map("is_met")
+  position    Int      @default(0)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  feature   Feature   @relation(fields: [featureId], references: [id], onDelete: Cascade)
+
+  @@index([featureId])
+  @@map("acceptance_criteria")
+}
+
+model FeatureDependency {
+  featureId   String @map("feature_id")
+  dependsOnId String @map("depends_on_id")
+
+  feature   Feature @relation("FeatureDependent", fields: [featureId], references: [id], onDelete: Cascade)
+  dependsOn Feature @relation("FeatureDependsOn", fields: [dependsOnId], references: [id], onDelete: Cascade)
+
+  @@id([featureId, dependsOnId])
+  @@map("feature_dependencies")
+}
+
+model Task {
+  id                 String     @id @default(cuid())
+  workspaceId        String     @map("workspace_id")
+  projectId          String     @map("project_id")
+  phaseId            String     @map("phase_id")
+  featureId          String?    @map("feature_id")
+  changeRequestId    String?    @map("change_request_id")
+  number             Int
+  title              String
+  description        String?
+  acceptanceCriteria String?    @map("acceptance_criteria")
+  status             TaskStatus @default(TODO)
+  priority           Priority   @default(MEDIUM)
+  assigneeId         String?    @map("assignee_id")
+  createdById        String?    @map("created_by_id")
+  dueDate            DateTime?  @map("due_date") @db.Date
+  estimatedHours     Decimal    @default(0) @map("estimated_hours") @db.Decimal(8, 2)
+  blockedReason      String?    @map("blocked_reason")
+  completedAt        DateTime?  @map("completed_at")
+  position           Int        @default(0)
+  createdAt          DateTime   @default(now()) @map("created_at")
+  updatedAt          DateTime   @updatedAt @map("updated_at")
+  deletedAt          DateTime?  @map("deleted_at")
+
+  workspace     Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project       Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  phase         Phase            @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  feature       Feature?         @relation(fields: [featureId], references: [id], onDelete: SetNull)
+  changeRequest ChangeRequest?   @relation(fields: [changeRequestId], references: [id], onDelete: SetNull)
+  assignee      User?            @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  createdBy     User?            @relation("TaskCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  subtasks      Subtask[]
+  comments      TaskComment[]
+  timeEntries   TimeEntry[]
+  bugs          Bug[]
+  dependencies  TaskDependency[] @relation("TaskDependent")
+  dependents    TaskDependency[] @relation("TaskDependsOn")
+
+  @@unique([workspaceId, number])
+  @@index([projectId, status])
+  @@index([workspaceId, assigneeId, status])
+  @@index([workspaceId, dueDate])
+  @@index([phaseId])
+  @@index([featureId])
+  @@map("tasks")
+}
+
+model TaskDependency {
+  taskId      String @map("task_id")
+  dependsOnId String @map("depends_on_id")
+
+  task      Task @relation("TaskDependent", fields: [taskId], references: [id], onDelete: Cascade)
+  dependsOn Task @relation("TaskDependsOn", fields: [dependsOnId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, dependsOnId])
+  @@map("task_dependencies")
+}
+
+model Subtask {
+  id          String    @id @default(cuid())
+  workspaceId String    @map("workspace_id")
+  taskId      String    @map("task_id")
+  title       String
+  isDone      Boolean   @default(false) @map("is_done")
+  assigneeId  String?   @map("assignee_id")
+  position    Int       @default(0)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  task      Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  assignee  User?     @relation(fields: [assigneeId], references: [id], onDelete: SetNull)
+
+  @@index([taskId])
+  @@map("subtasks")
+}
+
+model TaskComment {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  taskId      String   @map("task_id")
+  authorId    String   @map("author_id")
+  body        String
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  task      Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, createdAt])
+  @@map("task_comments")
+}
+
+// ───────────────────────────── QA ─────────────────────────────
+
+model Bug {
+  id                String       @id @default(cuid())
+  workspaceId       String       @map("workspace_id")
+  projectId         String       @map("project_id")
+  phaseId           String?      @map("phase_id")
+  featureId         String?      @map("feature_id")
+  taskId            String?      @map("task_id")
+  number            Int
+  title             String
+  severity          BugSeverity  @default(MEDIUM)
+  priority          Priority     @default(MEDIUM)
+  environment       Environment  @default(STAGING)
+  stepsToReproduce  String?      @map("steps_to_reproduce")
+  expectedResult    String?      @map("expected_result")
+  actualResult      String?      @map("actual_result")
+  status            BugStatus    @default(OPEN)
+  assigneeId        String?      @map("assignee_id")
+  reporterId        String?      @map("reporter_id")
+  fixedAt           DateTime?    @map("fixed_at")
+  retestResult      String?      @map("retest_result")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+  deletedAt         DateTime?    @map("deleted_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  phase     Phase?    @relation(fields: [phaseId], references: [id], onDelete: SetNull)
+  feature   Feature?  @relation(fields: [featureId], references: [id], onDelete: SetNull)
+  task      Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  assignee  User?     @relation("BugAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  reporter  User?     @relation("BugReporter", fields: [reporterId], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, number])
+  @@index([projectId, status])
+  @@index([workspaceId, severity, status])
+  @@map("bugs")
+}
+
+// ───────────────────────────── Documents & client control ─────────────────────────────
+
+model Document {
+  id               String           @id @default(cuid())
+  workspaceId      String           @map("workspace_id")
+  projectId        String           @map("project_id")
+  phaseId          String?          @map("phase_id")
+  featureId        String?          @map("feature_id")
+  name             String
+  category         DocumentCategory
+  status           DocumentStatus   @default(DRAFT)
+  currentVersionId String?          @unique @map("current_version_id")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+  deletedAt        DateTime?        @map("deleted_at")
+
+  workspace      Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project        Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  phase          Phase?            @relation(fields: [phaseId], references: [id], onDelete: SetNull)
+  feature        Feature?          @relation(fields: [featureId], references: [id], onDelete: SetNull)
+  versions       DocumentVersion[] @relation("DocumentVersions")
+  currentVersion DocumentVersion?  @relation("DocumentCurrentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+
+  @@index([projectId, category])
+  @@index([workspaceId])
+  @@map("documents")
+}
+
+// Versions are immutable once created: a new upload always creates a new row.
+model DocumentVersion {
+  id           String         @id @default(cuid())
+  workspaceId  String         @map("workspace_id")
+  documentId   String         @map("document_id")
+  version      Int
+  fileName     String         @map("file_name")
+  storagePath  String         @map("storage_path")
+  mimeType     String         @map("mime_type")
+  sizeBytes    Int            @map("size_bytes")
+  checksum     String?
+  changeNotes  String?        @map("change_notes")
+  uploadedById String?        @map("uploaded_by_id")
+  status       DocumentStatus @default(DRAFT)
+  createdAt    DateTime       @default(now()) @map("created_at")
+
+  workspace       Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  document        Document   @relation("DocumentVersions", fields: [documentId], references: [id], onDelete: Cascade)
+  currentOf       Document?  @relation("DocumentCurrentVersion")
+  uploadedBy      User?      @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  approvals       Approval[]
+
+  @@unique([documentId, version])
+  @@map("document_versions")
+}
+
+model Approval {
+  id                String         @id @default(cuid())
+  workspaceId       String         @map("workspace_id")
+  projectId         String         @map("project_id")
+  clientId          String         @map("client_id")
+  documentVersionId String?        @map("document_version_id")
+  featureId         String?        @map("feature_id")
+  number            Int
+  title             String
+  status            ApprovalStatus @default(PENDING)
+  requestedAt       DateTime       @default(now()) @map("requested_at")
+  dueDate           DateTime?      @map("due_date") @db.Date
+  decidedByName     String?        @map("decided_by_name")
+  decidedAt         DateTime?      @map("decided_at")
+  comments          String?
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+
+  workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project         Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  client          Client           @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  documentVersion DocumentVersion? @relation(fields: [documentVersionId], references: [id], onDelete: Restrict)
+  feature         Feature?         @relation(fields: [featureId], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, number])
+  @@index([workspaceId, status])
+  @@index([projectId, status])
+  @@map("approvals")
+}
+
+model ChangeRequest {
+  id              String              @id @default(cuid())
+  workspaceId     String              @map("workspace_id")
+  projectId       String              @map("project_id")
+  clientId        String              @map("client_id")
+  number          Int
+  title           String
+  requestedBy     String?             @map("requested_by")
+  requestDate     DateTime            @default(now()) @map("request_date") @db.Date
+  description     String?
+  originalScope   String?             @map("original_scope")
+  requestedChange String?             @map("requested_change")
+  additionalHours Decimal             @default(0) @map("additional_hours") @db.Decimal(8, 2)
+  additionalCost  Decimal             @default(0) @map("additional_cost") @db.Decimal(14, 2)
+  impact          String?
+  priority        Priority            @default(MEDIUM)
+  status          ChangeRequestStatus @default(DRAFT)
+  decidedAt       DateTime?           @map("decided_at")
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+  deletedAt       DateTime?           @map("deleted_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  client    Client    @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  tasks     Task[]
+
+  @@unique([workspaceId, number])
+  @@index([projectId, status])
+  @@map("change_requests")
+}
+
+// ───────────────────────────── Finance ─────────────────────────────
+
+model Milestone {
+  id          String          @id @default(cuid())
+  workspaceId String          @map("workspace_id")
+  projectId   String          @map("project_id")
+  phaseId     String?         @map("phase_id")
+  name        String
+  amount      Decimal         @db.Decimal(14, 2)
+  dueDate     DateTime?       @map("due_date") @db.Date
+  status      MilestoneStatus @default(PENDING)
+  position    Int             @default(0)
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  phase     Phase?    @relation(fields: [phaseId], references: [id], onDelete: SetNull)
+  invoices  Invoice[]
+
+  @@index([projectId])
+  @@map("milestones")
+}
+
+model Invoice {
+  id          String        @id @default(cuid())
+  workspaceId String        @map("workspace_id")
+  clientId    String        @map("client_id")
+  projectId   String        @map("project_id")
+  milestoneId String?       @map("milestone_id")
+  number      String
+  subtotal    Decimal       @db.Decimal(14, 2)
+  taxAmount   Decimal       @default(0) @map("tax_amount") @db.Decimal(14, 2)
+  total       Decimal       @db.Decimal(14, 2)
+  issueDate   DateTime      @map("issue_date") @db.Date
+  dueDate     DateTime      @map("due_date") @db.Date
+  status      InvoiceStatus @default(DRAFT)
+  notes       String?
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  deletedAt   DateTime?     @map("deleted_at")
+
+  workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  client    Client        @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  project   Project       @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  milestone Milestone?    @relation(fields: [milestoneId], references: [id], onDelete: SetNull)
+  items     InvoiceItem[]
+  payments  Payment[]
+
+  @@unique([workspaceId, number])
+  @@index([workspaceId, status, dueDate])
+  @@index([projectId])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id          String  @id @default(cuid())
+  workspaceId String  @map("workspace_id")
+  invoiceId   String  @map("invoice_id")
+  description String
+  quantity    Decimal @default(1) @db.Decimal(10, 2)
+  unitPrice   Decimal @map("unit_price") @db.Decimal(14, 2)
+  amount      Decimal @db.Decimal(14, 2)
+  position    Int     @default(0)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invoice   Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@map("invoice_items")
+}
+
+model Payment {
+  id            String        @id @default(cuid())
+  workspaceId   String        @map("workspace_id")
+  invoiceId     String        @map("invoice_id")
+  amount        Decimal       @db.Decimal(14, 2)
+  paidAt        DateTime      @map("paid_at") @db.Date
+  method        PaymentMethod @default(BANK_TRANSFER)
+  transactionId String?       @map("transaction_id")
+  notes         String?
+  createdAt     DateTime      @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invoice   Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, paidAt])
+  @@index([invoiceId])
+  @@map("payments")
+}
+
+model Expense {
+  id          String          @id @default(cuid())
+  workspaceId String          @map("workspace_id")
+  projectId   String          @map("project_id")
+  category    ExpenseCategory
+  description String
+  amount      Decimal         @db.Decimal(14, 2)
+  incurredOn  DateTime        @map("incurred_on") @db.Date
+  vendor      String?
+  receiptPath String?         @map("receipt_path")
+  notes       String?
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+  deletedAt   DateTime?       @map("deleted_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, incurredOn])
+  @@index([projectId])
+  @@map("expenses")
+}
+
+// A running timer is a TimeEntry with startedAt set and endedAt null.
+model TimeEntry {
+  id          String    @id @default(cuid())
+  workspaceId String    @map("workspace_id")
+  projectId   String    @map("project_id")
+  phaseId     String?   @map("phase_id")
+  featureId   String?   @map("feature_id")
+  taskId      String?   @map("task_id")
+  userId      String    @map("user_id")
+  date        DateTime  @db.Date
+  hours       Decimal   @default(0) @db.Decimal(6, 2)
+  description String?
+  startedAt   DateTime? @map("started_at")
+  endedAt     DateTime? @map("ended_at")
+  billable    Boolean   @default(true)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  phase     Phase?    @relation(fields: [phaseId], references: [id], onDelete: SetNull)
+  feature   Feature?  @relation(fields: [featureId], references: [id], onDelete: SetNull)
+  task      Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, date])
+  @@index([taskId])
+  @@index([workspaceId, userId, endedAt])
+  @@map("time_entries")
+}
+
+// ───────────────────────────── Delivery ─────────────────────────────
+
+model Deployment {
+  id           String           @id @default(cuid())
+  workspaceId  String           @map("workspace_id")
+  projectId    String           @map("project_id")
+  version      String
+  environment  Environment
+  status       DeploymentStatus @default(PENDING)
+  commitSha    String?          @map("commit_sha")
+  releaseNotes String?          @map("release_notes")
+  deployedById String?          @map("deployed_by_id")
+  deployedAt   DateTime?        @map("deployed_at")
+  scheduledFor DateTime?        @map("scheduled_for")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+
+  workspace  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project    Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  deployedBy User?     @relation(fields: [deployedById], references: [id], onDelete: SetNull)
+
+  @@index([projectId, createdAt])
+  @@map("deployments")
+}
+
+model HandoverItem {
+  id          String             @id @default(cuid())
+  workspaceId String             @map("workspace_id")
+  projectId   String             @map("project_id")
+  name        String
+  isRequired  Boolean            @default(true) @map("is_required")
+  status      HandoverItemStatus @default(PENDING)
+  notes       String?
+  completedAt DateTime?          @map("completed_at")
+  position    Int                @default(0)
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("handover_items")
+}
+
+model MaintenancePlan {
+  id            String    @id @default(cuid())
+  workspaceId   String    @map("workspace_id")
+  projectId     String    @unique @map("project_id")
+  plan          String
+  startDate     DateTime  @map("start_date") @db.Date
+  endDate       DateTime  @map("end_date") @db.Date
+  monthlyCost   Decimal   @map("monthly_cost") @db.Decimal(14, 2)
+  includedHours Decimal   @map("included_hours") @db.Decimal(6, 2)
+  supportLevel  String    @map("support_level")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project         Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  supportRequests SupportRequest[]
+
+  @@map("maintenance_plans")
+}
+
+model SupportRequest {
+  id                String        @id @default(cuid())
+  workspaceId       String        @map("workspace_id")
+  maintenancePlanId String        @map("maintenance_plan_id")
+  title             String
+  kind              String        @default("SUPPORT") // SUPPORT | BUG_FIX | CHANGE | DEPLOYMENT
+  status            SupportStatus @default(OPEN)
+  hoursUsed         Decimal       @default(0) @map("hours_used") @db.Decimal(6, 2)
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  workspace       Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  maintenancePlan MaintenancePlan @relation(fields: [maintenancePlanId], references: [id], onDelete: Cascade)
+
+  @@index([maintenancePlanId, status])
+  @@map("support_requests")
+}
+
+// Free-standing calendar items (client meetings etc.). Deadlines for tasks, invoices,
+// approvals and deployments are aggregated from their own tables.
+model CalendarEvent {
+  id          String            @id @default(cuid())
+  workspaceId String            @map("workspace_id")
+  projectId   String?           @map("project_id")
+  title       String
+  type        CalendarEventType @default(MEETING)
+  startsAt    DateTime          @map("starts_at")
+  endsAt      DateTime?         @map("ends_at")
+  notes       String?
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, startsAt])
+  @@map("calendar_events")
+}
+
+// ───────────────────────────── Audit & notifications ─────────────────────────────
+
+// Append-only. UPDATE/DELETE are rejected by a database trigger (see migration).
+model Activity {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  actorId     String?  @map("actor_id")
+  projectId   String?  @map("project_id")
+  entityType  String   @map("entity_type")
+  entityId    String   @map("entity_id")
+  action      String
+  summary     String
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actor     User?     @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  project   Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@index([projectId, createdAt])
+  @@index([entityType, entityId])
+  @@map("activities")
+}
+
+model Notification {
+  id          String    @id @default(cuid())
+  workspaceId String    @map("workspace_id")
+  userId      String    @map("user_id")
+  kind        String
+  title       String
+  body        String?
+  href        String?
+  readAt      DateTime? @map("read_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+  @@map("notifications")
+}
