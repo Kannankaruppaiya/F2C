@@ -1,12 +1,11 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { EmptyState, AvatarName } from "@/components/ui/misc";
 import { Money } from "@/components/ui/money";
 import { Table, TD, TH, THead, TR } from "@/components/ui/table";
 import { formatDate, formatDateTime, type MoneyFormat } from "@/lib/format";
-import { toISODate } from "@/lib/dates";
-import { APPROVAL_STATUS, BUG_SEVERITY, BUG_STATUS, CHANGE_REQUEST_STATUS, DEPLOYMENT_STATUS, DOCUMENT_STATUS, INVOICE_STATUS, PRIORITY } from "@/lib/status";
-import type { listApprovals, listBugs, listChangeRequests, listDeployments, listDocuments, listExpenses, listInvoices, listPayments } from "@/server/services/records";
+import { BUG_SEVERITY, BUG_STATUS, DEPLOYMENT_STATUS, INVOICE_STATUS } from "@/lib/status";
+import type { listBugs, listDeployments, listExpenses, listInvoices, listPayments } from "@/server/services/records";
 
 type R<F extends (...a: never[]) => Promise<unknown[]>> = Awaited<ReturnType<F>>;
 
@@ -103,106 +102,6 @@ export function ExpenseTable({ rows, fmt, showProject }: { rows: R<typeof listEx
         ))}
       </tbody>
     </Table>
-  );
-}
-
-export function ApprovalTable({ rows, today, showProject }: { rows: R<typeof listApprovals>; today: string; showProject?: boolean }) {
-  if (!rows.length) return <EmptyState title="No approvals requested." description="Each approval is pinned to the exact document version the client signed off." />;
-  return (
-    <Table>
-      <THead>
-        <TH>Approval</TH>
-        {showProject && <TH className="hidden md:table-cell">Project</TH>}
-        <TH className="hidden lg:table-cell">Version</TH>
-        <TH className="hidden sm:table-cell">Requested</TH>
-        <TH className="hidden sm:table-cell">Due</TH>
-        <TH>Status</TH>
-        <TH className="hidden lg:table-cell">Decision</TH>
-      </THead>
-      <tbody>
-        {rows.map((a) => {
-          const overdue = a.status === "PENDING" && a.dueDate !== null && a.dueDate < today;
-          return (
-            <TR key={a.id}>
-              <TD>
-                <div className="font-medium">{a.title}</div>
-                <div className="font-mono text-2xs text-ink-4">{a.key}</div>
-              </TD>
-              {showProject && <TD className="hidden md:table-cell"><ProjectLink p={a.project} /></TD>}
-              <TD className="hidden text-ink-2 lg:table-cell">{a.document ?? a.feature ?? "—"}</TD>
-              <TD className="tabular hidden sm:table-cell">{formatDate(toISODate(new Date(a.requestedAt)))}</TD>
-              <TD className={`tabular hidden sm:table-cell ${overdue ? "font-medium text-bad" : ""}`}>{formatDate(a.dueDate)}</TD>
-              <TD><StatusBadge defs={APPROVAL_STATUS} value={a.status} /></TD>
-              <TD className="hidden text-xs text-ink-3 lg:table-cell">{a.decidedBy ? `${a.decidedBy} · ${formatDateTime(a.decidedAt!)}` : "—"}</TD>
-            </TR>
-          );
-        })}
-      </tbody>
-    </Table>
-  );
-}
-
-export function ChangeRequestList({ rows, fmt, showProject }: { rows: R<typeof listChangeRequests>; fmt: MoneyFormat; showProject?: boolean }) {
-  if (!rows.length) return <EmptyState title="No change requests." description="Scope changes are tracked separately from tasks, with their own hours, cost and client approval." />;
-  return (
-    <ul className="divide-y divide-line">
-      {rows.map((c) => (
-        <li key={c.id} className="px-4 py-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-mono text-xs text-ink-3">{c.key}</span>
-            <span className="text-[13px] font-medium">{c.title}</span>
-            <StatusBadge defs={CHANGE_REQUEST_STATUS} value={c.status} />
-            <Badge tone={PRIORITY[c.priority].tone}>{PRIORITY[c.priority].label}</Badge>
-            {showProject && <span className="text-xs"><ProjectLink p={c.project} /></span>}
-          </div>
-          <div className="mt-2 grid gap-3 text-xs sm:grid-cols-4">
-            <div><p className="text-ink-4">Original</p><p className="text-ink-2">{c.originalScope ?? "—"}</p></div>
-            <div><p className="text-ink-4">Requested</p><p className="text-ink">{c.requestedChange ?? "—"}</p></div>
-            <div><p className="text-ink-4">Additional effort</p><p className="tabular text-ink">{c.additionalHours}h</p></div>
-            <div><p className="text-ink-4">Additional cost</p><p className="text-ink"><Money value={c.additionalCost} fmt={fmt} /></p></div>
-          </div>
-          {c.impact && <p className="mt-2 text-xs text-ink-3"><span className="text-ink-4">Impact: </span>{c.impact}</p>}
-          <p className="mt-1 text-2xs text-ink-4">Requested by {c.requestedBy ?? "client"} on {formatDate(c.requestDate, { year: true })}{c.taskCount ? ` · ${c.taskCount} task(s) generated` : ""}</p>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-const DOC_CATEGORY: Record<string, string> = {
-  REQUIREMENTS: "01 Requirements", PROPOSAL: "02 Proposal", SCOPE: "03 Scope", UI_UX: "04 UI/UX", TECHNICAL: "05 Technical", API: "06 API",
-  DATABASE: "07 Database", QA: "08 QA", CLIENT_APPROVALS: "09 Client Approvals", INVOICES: "10 Invoices", DEPLOYMENT: "11 Deployment", HANDOVER: "12 Handover",
-};
-
-export function DocumentList({ rows, showProject }: { rows: R<typeof listDocuments>; showProject?: boolean }) {
-  if (!rows.length) return <EmptyState title="No documents yet." description="Requirements, designs and technical docs are versioned — approved versions are never overwritten." />;
-  return (
-    <ul className="divide-y divide-line">
-      {rows.map((d) => (
-        <li key={d.id} className="px-4 py-3">
-          <details>
-            <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2">
-              <span className="text-2xs font-medium uppercase tracking-wide text-ink-4">{DOC_CATEGORY[d.category]}</span>
-              <span className="text-[13px] font-medium">{d.name}</span>
-              {d.currentVersion && <Badge tone="neutral">v{d.currentVersion}</Badge>}
-              <StatusBadge defs={DOCUMENT_STATUS} value={d.status} />
-              {showProject && <span className="text-xs"><ProjectLink p={d.project} /></span>}
-              <span className="ml-auto text-xs text-ink-4">{d.versions.length} version{d.versions.length === 1 ? "" : "s"} · updated {formatDateTime(d.updatedAt)}</span>
-            </summary>
-            <ol className="mt-2 space-y-1 border-l border-line pl-3">
-              {d.versions.map((v) => (
-                <li key={v.id} className="flex flex-wrap items-center gap-2 text-xs">
-                  <span className="font-mono text-ink-2">v{v.version}</span>
-                  <span className="text-ink-3">{v.fileName}</span>
-                  <StatusBadge defs={DOCUMENT_STATUS} value={v.status} />
-                  <span className="text-ink-4">{v.uploadedBy ?? "—"} · {formatDateTime(v.createdAt)} · {Math.round(v.sizeBytes / 1024)} KB</span>
-                </li>
-              ))}
-            </ol>
-          </details>
-        </li>
-      ))}
-    </ul>
   );
 }
 

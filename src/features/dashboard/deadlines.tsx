@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { addDays, startOfWeek } from "@/lib/dates";
 import { formatDate } from "@/lib/format";
 import type { DeadlineItem } from "@/server/services/dashboard";

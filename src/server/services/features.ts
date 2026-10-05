@@ -17,6 +17,7 @@ export async function listFeatures(ctx: AuthContext, projectId: string, opts: { 
     orderBy: [{ phase: { position: "asc" } }, { position: "asc" }, { createdAt: "asc" }],
     include: {
       phase: { select: { id: true, name: true, position: true } },
+      changeRequest: { select: { id: true, number: true } },
       acceptanceCriteria: { orderBy: { position: "asc" } },
       dependencies: { select: { dependsOnId: true } },
       tasks: { where: { deletedAt: null }, select: { status: true, estimatedHours: true } },
@@ -44,6 +45,7 @@ export async function listFeatures(ctx: AuthContext, projectId: string, opts: { 
       openBugCount: f._count.bugs,
       acceptanceCriteria: f.acceptanceCriteria.map((a) => ({ id: a.id, text: a.text, isMet: a.isMet })),
       dependsOnIds: f.dependencies.map((d) => d.dependsOnId),
+      changeRequest: f.changeRequest ? { id: f.changeRequest.id, key: `CR-${String(f.changeRequest.number).padStart(3, "0")}` } : null,
     };
   });
 }
@@ -53,6 +55,14 @@ export type FeatureRow = Awaited<ReturnType<typeof listFeatures>>[number];
 async function assertPhaseInProject(tx: Tx, projectId: string, phaseId: string) {
   const phase = await tx.phase.findFirst({ where: { id: phaseId, projectId, deletedAt: null }, select: { id: true } });
   if (!phase) throw ruleViolation("Phase does not belong to this project");
+}
+
+/** A feature can only be attributed to an approved/implemented change request of the same project. */
+async function assertChangeRequest(tx: Tx, projectId: string, changeRequestId: string | null | undefined) {
+  if (!changeRequestId) return;
+  const cr = await tx.changeRequest.findFirst({ where: { id: changeRequestId, projectId, deletedAt: null }, select: { status: true } });
+  if (!cr) throw ruleViolation("Change request does not belong to this project");
+  if (cr.status !== "APPROVED" && cr.status !== "IMPLEMENTED") throw ruleViolation("Only approved change requests can add features to scope");
 }
 
 async function setDependencies(tx: Tx, projectId: string, featureId: string, dependsOnIds: string[]) {
@@ -83,6 +93,7 @@ export async function createFeature(ctx: AuthContext, projectId: string, input: 
   await assertProjectAccess(ctx, projectId);
   return db.$transaction(async (tx) => {
     await assertPhaseInProject(tx, projectId, data.phaseId);
+    await assertChangeRequest(tx, projectId, data.changeRequestId);
     const { acceptanceCriteria, dependsOnIds, ...rest } = data;
     const last = await tx.feature.aggregate({ where: { phaseId: data.phaseId, deletedAt: null }, _max: { position: true } });
     const feature = await tx.feature.create({
@@ -112,6 +123,7 @@ export async function updateFeature(ctx: AuthContext, featureId: string, input: 
       // Tasks follow their feature into the new phase (rule 4: a feature's tasks share its phase).
       await tx.task.updateMany({ where: { featureId }, data: { phaseId: data.phaseId } });
     }
+    if (data.changeRequestId !== undefined) await assertChangeRequest(tx, existing.projectId, data.changeRequestId);
     const { acceptanceCriteria, dependsOnIds, ...rest } = data;
     const feature = await tx.feature.update({ where: { id: featureId }, data: rest });
     if (acceptanceCriteria) await setCriteria(tx, ctx.workspaceId, featureId, acceptanceCriteria);

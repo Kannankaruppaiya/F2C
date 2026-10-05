@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { timeAgo, formatDateTime } from "@/lib/format";
 import type { ActivityItem } from "@/server/services/activity";
 import { EmptyState } from "@/components/ui/misc";

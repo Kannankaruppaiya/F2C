@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { useRouter } from "next/navigation";
 import { Button, buttonClass } from "@/components/ui/button";
 import { Field, FormError, FormSection, Input, Select, Textarea } from "@/components/ui/field";

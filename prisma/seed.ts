@@ -2,12 +2,41 @@
 // Never run against production: it TRUNCATEs every table.
 import { PrismaClient, type FeatureStatus, type PhaseStatus, type Priority, type ProjectStatus, type Role, type TaskStatus } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { randomUUID } from "node:crypto";
+import { rm } from "node:fs/promises";
+import path from "node:path";
+import { getStorage, sha256 } from "../src/server/storage";
+import { documentVersionKey } from "../src/server/storage/keys";
 
 const db = new PrismaClient();
 const DAY = 86_400_000;
 const TODAY = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00.000Z");
 const d = (offset: number) => new Date(TODAY.getTime() + offset * DAY);
 const at = (offset: number, hour = 11) => new Date(TODAY.getTime() + offset * DAY + hour * 3_600_000);
+const d0 = (offset: number) => d(offset);
+
+/** A small, valid single-page PDF so seeded documents open in any viewer. */
+function makePdf(title: string, lines: string[]): Buffer {
+  const esc = (t: string) => t.replace(/[\\()]/g, (m) => `\\${m}`).replace(/[^\x20-\x7e]/g, "-");
+  const text = [`BT /F1 20 Tf 72 760 Td (${esc(title)}) Tj ET`, ...lines.map((l, i) => `BT /F1 12 Tf 72 ${720 - i * 20} Td (${esc(l)}) Tj ET`)].join("\n");
+  const objs = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+    `<< /Length ${Buffer.byteLength(text)} >>\nstream\n${text}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  let out = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  objs.forEach((o, i) => {
+    offsets.push(Buffer.byteLength(out));
+    out += `${i + 1} 0 obj\n${o}\nendobj\n`;
+  });
+  const xref = Buffer.byteLength(out);
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, "0")} 00000 n \n`).join("")}`;
+  out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(out, "latin1");
+}
 
 if (process.env.NODE_ENV === "production" && process.env.ALLOW_SEED !== "true") {
   throw new Error("Refusing to seed in production (set ALLOW_SEED=true to override)");
@@ -47,6 +76,8 @@ const USERS: { key: string; name: string; email: string; role: Role; rate: numbe
   { key: "vikram", name: "Vikram Rao", email: "vikram@pcc.dev", role: "QA", rate: 500, color: "#d97706" },
   { key: "meera", name: "Meera Iyer", email: "meera@pcc.dev", role: "FINANCE", rate: 0, color: "#7c3aed" },
   { key: "clientuser", name: "Anil Kapoor", email: "anil@apexretail.example", role: "CLIENT", rate: 0, color: "#64748b", client: "apex" },
+  { key: "suresh", name: "Dr. Suresh Kumar", email: "suresh@kumarclinic.example", role: "CLIENT", rate: 0, color: "#0f766e", client: "kumar" },
+  { key: "fatima", name: "Fatima Al Zarooni", email: "fatima@bloomorganics.example", role: "CLIENT", rate: 0, color: "#b45309", client: "bloom" },
 ];
 
 const CLIENTS = [
@@ -248,6 +279,10 @@ async function main() {
   console.log("Resetting data…");
   // TRUNCATE bypasses the append-only DELETE trigger on activities.
   await db.$executeRawUnsafe(`TRUNCATE TABLE "workspaces", "users" RESTART IDENTITY CASCADE`);
+  // Remove previously seeded local blobs (the rows referencing them are gone).
+  if ((process.env.STORAGE_DRIVER ?? "local") === "local") {
+    await rm(path.join(process.env.STORAGE_LOCAL_DIR ?? path.join(process.cwd(), "storage"), "w"), { recursive: true, force: true });
+  }
 
   const passwordHash = await bcrypt.hash("demo-password-2026", 12);
   const ws = await db.workspace.create({
@@ -274,9 +309,9 @@ async function main() {
   }
   const owner = users.owner!;
 
-  const activity = (data: { projectId?: string; entityType: string; entityId: string; action: string; summary: string; createdAt: Date; actor?: string }) =>
+  const activity = (data: { projectId?: string; entityType: string; entityId: string; action: string; summary: string; createdAt: Date; actor?: string; meta?: Record<string, string | number | boolean> }) =>
     db.activity.create({
-      data: { workspaceId: W, actorId: data.actor ? users[data.actor] : owner, projectId: data.projectId, entityType: data.entityType, entityId: data.entityId, action: data.action, summary: data.summary, createdAt: data.createdAt },
+      data: { workspaceId: W, actorId: data.actor ? users[data.actor] : owner, projectId: data.projectId, entityType: data.entityType, entityId: data.entityId, action: data.action, summary: data.summary, createdAt: data.createdAt, metadata: data.meta },
     });
 
   const projects: Record<string, { id: string; phases: Record<string, string>; features: Record<string, string>; tasks: { id: string; title: string }[] }> = {};
@@ -382,48 +417,118 @@ async function main() {
     ],
   });
 
-  // ─── Documents, approvals, change requests ───
+  // ─── Documents, versions, approvals, change requests (Phase 3) ───
+  // Files are written through the real storage provider so every seeded version is downloadable.
   const counter = (k: string) => (counters[k] = (counters[k] ?? 0) + 1);
-  const doc = async (p: string, name: string, category: "REQUIREMENTS" | "UI_UX" | "SCOPE" | "TECHNICAL", versions: number, status: "APPROVED" | "SENT_TO_CLIENT" | "DRAFT", phase?: string) => {
+  const storage = getStorage();
+  type DocStatus = "DRAFT" | "INTERNAL_REVIEW" | "SENT_TO_CLIENT" | "APPROVED" | "REJECTED";
+  interface VersionSpec { summary: string; day: number; by?: string; status?: DocStatus; shared?: boolean }
+  const doc = async (p: string, name: string, category: "REQUIREMENTS" | "UI_UX" | "SCOPE" | "TECHNICAL" | "PROPOSAL", status: DocStatus, versions: VersionSpec[], phase?: string, description?: string) => {
     const project = projects[p]!;
-    const document = await db.document.create({ data: { workspaceId: W, projectId: project.id, phaseId: phase ? project.phases[phase] : null, name, category, status } });
-    let last: string | null = null;
-    for (let v = 1; v <= versions; v++) {
+    const documentId = `d${randomUUID().replace(/-/g, "")}`;
+    await db.document.create({ data: { id: documentId, workspaceId: W, projectId: project.id, phaseId: phase ? project.phases[phase] : null, name, category, status, description, createdById: owner, createdAt: at(versions[0]!.day, 10) } });
+    const ids: string[] = [];
+    for (const [i, v] of versions.entries()) {
+      const n = i + 1;
+      const body = makePdf(`${name} v${n}`, [PROJECTS.find((x) => x.key === p)!.name, v.summary, `Prepared by Northwind Software Studio`]);
+      const key = documentVersionKey(W, documentId);
+      await storage.put(key, body, "application/pdf");
       const ver = await db.documentVersion.create({
-        data: { workspaceId: W, documentId: document.id, version: v, fileName: `${name.toLowerCase().replace(/\W+/g, "-")}-v${v}.pdf`, storagePath: `${W}/${project.id}/${document.id}/v${v}.pdf`, mimeType: "application/pdf", sizeBytes: 180_000 + v * 12_000, uploadedById: owner, status: v === versions ? status : "ARCHIVED", createdAt: at(-40 + v * 8) },
+        data: {
+          workspaceId: W, documentId, versionNumber: n, storageKey: key, originalFilename: `${name.toLowerCase().replace(/\W+/g, "-")}-v${n}.pdf`,
+          mimeType: "application/pdf", fileSize: body.length, checksum: sha256(body), changeSummary: v.summary, uploadedById: users[v.by ?? "owner"],
+          status: v.status ?? "DRAFT", sharedAt: v.shared ? at(v.day, 12) : null, createdAt: at(v.day, 11),
+        },
       });
-      last = ver.id;
+      ids.push(ver.id);
+      await activity({ projectId: project.id, entityType: "document", entityId: documentId, action: n === 1 ? "document.created" : "document.version_uploaded", summary: `${name} v${n} uploaded — ${v.summary}`, createdAt: at(v.day, 11), actor: v.by, meta: { documentId, versionId: ver.id, versionNumber: n, ...(v.shared ? { clientVisible: true } : {}) } });
     }
-    await db.document.update({ where: { id: document.id }, data: { currentVersionId: last } });
-    return { documentId: document.id, versionId: last! };
+    await db.document.update({ where: { id: documentId }, data: { currentVersionId: ids.at(-1) } });
+    return { documentId, versionIds: ids, name };
   };
 
-  const req = await doc("aisales", "Requirements", "REQUIREMENTS", 2, "APPROVED", "Discovery");
-  const ui = await doc("aisales", "UI Design", "UI_UX", 3, "SENT_TO_CLIENT", "UI/UX");
-  const pUi = await doc("patient", "Assessment Report Layout", "UI_UX", 2, "SENT_TO_CLIENT", "QA");
-  const bloomUat = await doc("bloom", "UAT Build Notes", "TECHNICAL", 1, "SENT_TO_CLIENT", "Client UAT");
-  await doc("fleet", "Technical Architecture", "TECHNICAL", 1, "APPROVED", "Discovery");
-
-  const approval = (p: string, client: string, title: string, versionId: string | null, status: "PENDING" | "APPROVED", due: number, requested: number, decided?: string) =>
-    db.approval.create({
-      data: { workspaceId: W, projectId: projects[p]!.id, clientId: clients[client]!, documentVersionId: versionId, number: counter("approval"), title, status, dueDate: d(due), requestedAt: at(requested), decidedAt: status === "APPROVED" ? at(requested + 2) : null, decidedByName: decided },
+  const approval = async (p: string, client: string, approverKey: string, d: { documentId: string; versionIds: string[]; name: string }, versionNumber: number, o: { status: "PENDING" | "APPROVED" | "CHANGES_REQUESTED"; requested: number; due: number; message?: string; comment?: string; responded?: number; viewed?: number }) => {
+    const number = counter("approval");
+    const title = `${d.name} v${versionNumber}`;
+    const approver = USERS.find((u) => u.key === approverKey)!;
+    const a = await db.approval.create({
+      data: {
+        workspaceId: W, projectId: projects[p]!.id, clientId: clients[client]!, documentId: d.documentId, documentVersionId: d.versionIds[versionNumber - 1]!, number, title,
+        status: o.status, requesterId: owner, approverId: users[approverKey], requestMessage: o.message, requestedAt: at(o.requested, 10), dueDate: d0(o.due),
+        viewedAt: o.viewed !== undefined ? at(o.viewed, 15) : o.responded !== undefined ? at(o.responded, 9) : null,
+        respondedAt: o.responded !== undefined ? at(o.responded, 12) : null, respondedByName: o.responded !== undefined ? approver.name : null, comments: o.comment,
+      },
     });
-  const a1 = await approval("aisales", "apex", "Requirements v2", req.versionId, "APPROVED", -60, -64, "Anil Kapoor");
-  await activity({ projectId: projects.aisales!.id, entityType: "approval", entityId: a1.id, action: "approval.approved", summary: "Client approved Requirements v2", createdAt: at(-62, 12) });
-  await approval("aisales", "apex", "UI Design v3", ui.versionId, "PENDING", 1, -4);
-  await approval("patient", "kumar", "Assessment Report Layout v2", pUi.versionId, "PENDING", -2, -6);
-  await approval("bloom", "bloom", "UAT Build 1.0 sign-off", bloomUat.versionId, "PENDING", 4, -3);
+    const meta = { documentId: d.documentId, versionId: a.documentVersionId, versionNumber, approvalId: a.id, clientVisible: true };
+    await activity({ projectId: projects[p]!.id, entityType: "approval", entityId: a.id, action: "approval.requested", summary: `${title} sent to ${approver.name} for approval`, createdAt: at(o.requested, 10), meta });
+    if (o.status === "APPROVED") await activity({ projectId: projects[p]!.id, entityType: "approval", entityId: a.id, action: "approval.approved", summary: `${title} approved by ${approver.name}`, createdAt: at(o.responded!, 12), actor: approverKey, meta });
+    if (o.status === "CHANGES_REQUESTED") await activity({ projectId: projects[p]!.id, entityType: "approval", entityId: a.id, action: "approval.changes_requested", summary: `${approver.name} requested changes to ${title}`, createdAt: at(o.responded!, 12), actor: approverKey, meta });
+    return a;
+  };
 
-  const crBloom = await db.changeRequest.create({
-    data: { workspaceId: W, projectId: projects.bloom!.id, clientId: clients.bloom!, number: 14, title: "Social login", requestedBy: "Fatima Al Zarooni", requestDate: d(-5),
-      description: "Client wants users to sign in with Google and Microsoft accounts.", originalScope: "Email login", requestedChange: "Google + Microsoft login", additionalHours: 12, additionalCost: 8000,
-      impact: "Adds ~2 days to Deployment phase; requires Apple Sign-In as well for App Store compliance.", priority: "MEDIUM", status: "PENDING_CLIENT_APPROVAL" } });
-  counters.change_request = 14;
-  await activity({ projectId: projects.bloom!.id, entityType: "change_request", entityId: crBloom.id, action: "change_request.created", summary: "Change request CR-014 created: Social login", createdAt: at(-5, 14) });
-  const crApex = await db.changeRequest.create({
-    data: { workspaceId: W, projectId: projects.aisales!.id, clientId: clients.apex!, number: 13, title: "Objection library", requestedBy: "Anil Kapoor", requestDate: d(-25),
-      originalScope: "Free-form roleplay only", requestedChange: "Curated library of objection scenarios", additionalHours: 16, additionalCost: 15000, priority: "MEDIUM", status: "APPROVED", decidedAt: at(-22) } });
-  await activity({ projectId: projects.aisales!.id, entityType: "change_request", entityId: crApex.id, action: "change_request.approved", summary: "Client approved CR-013: Objection library", createdAt: at(-22, 11) });
+  // AI Sales Training: Requirements v1→v2 approved; UI Design v2 changes requested, v3 pending; internal proposal.
+  const req = await doc("aisales", "Requirements", "REQUIREMENTS", "APPROVED", [
+    { summary: "Initial requirements from stakeholder interviews", day: -68, shared: true, status: "SENT_TO_CLIENT" },
+    { summary: "Added scoring rubric and manager dashboard", day: -65, shared: true, status: "APPROVED" },
+  ], "Discovery", "Functional requirements for the roleplay platform.");
+  await approval("aisales", "apex", "clientuser", req, 2, { status: "APPROVED", requested: -65, due: -62, responded: -63, comment: "Approved. Matches what we discussed." });
+  const ui = await doc("aisales", "UI Design", "UI_UX", "SENT_TO_CLIENT", [
+    { summary: "Wireframes for roleplay and history", day: -58, by: "sara" },
+    { summary: "High-fidelity screens", day: -50, by: "sara", shared: true, status: "SENT_TO_CLIENT" },
+    { summary: "Score card redesign per Anil's feedback", day: -4, by: "sara", shared: true, status: "SENT_TO_CLIENT" },
+  ], "UI/UX");
+  await approval("aisales", "apex", "clientuser", ui, 2, { status: "CHANGES_REQUESTED", requested: -50, due: -45, responded: -46, comment: "The score card is hard to read on laptops. Please make the category breakdown more prominent." });
+  await approval("aisales", "apex", "clientuser", ui, 3, { status: "PENDING", requested: -4, due: 1, message: "Updated score card as requested — section 3 of the deck." });
+  await doc("aisales", "Proposal & Estimate", "PROPOSAL", "DRAFT", [{ summary: "Internal estimate (not for client)", day: -80 }]);
+
+  // Patient Assessment: pending approval, overdue.
+  const pUi = await doc("patient", "Assessment Report Layout", "UI_UX", "SENT_TO_CLIENT", [
+    { summary: "Printable A4 layout", day: -20, by: "sara" },
+    { summary: "Pagination for long assessments", day: -6, by: "sara", shared: true, status: "SENT_TO_CLIENT" },
+  ], "QA");
+  await approval("patient", "kumar", "suresh", pUi, 2, { status: "PENDING", requested: -6, due: -2, viewed: -5 });
+
+  // Bloom: UAT sign-off pending.
+  const bloomUat = await doc("bloom", "UAT Build Notes", "TECHNICAL", "SENT_TO_CLIENT", [{ summary: "Build 1.0 (TestFlight) — test scenarios", day: -3, by: "priya", shared: true, status: "SENT_TO_CLIENT" }], "Client UAT");
+  await approval("bloom", "bloom", "fatima", bloomUat, 1, { status: "PENDING", requested: -3, due: 4 });
+
+  await doc("fleet", "Technical Architecture", "TECHNICAL", "INTERNAL_REVIEW", [{ summary: "Ingestion pipeline and storage design", day: -45 }], "Discovery");
+
+  // Change requests: approved (with implementation tasks), pending, rejected, draft.
+  const cr = (o: Record<string, unknown>) => db.changeRequest.create({ data: { workspaceId: W, ...o } as never });
+  const crRejected = await cr({
+    projectId: projects.aisales!.id, clientId: clients.apex!, number: 12, title: "Native mobile apps", requestedBy: "Anil Kapoor", requestedById: users.clientuser, requestDate: d0(-40),
+    description: "Reps want to practise on their phones.", originalScope: "Responsive web app", requestedChange: "Native iOS + Android apps", impact: "Adds ~6 weeks; separate release process.",
+    estimatedHours: 240, additionalCost: 180000, priority: "LOW", status: "REJECTED", submittedAt: at(-37), resolvedAt: at(-35), clientDecision: "Not in this year's budget. Revisit after launch.", decidedById: users.clientuser,
+  });
+  const crApex = await cr({
+    projectId: projects.aisales!.id, clientId: clients.apex!, number: 13, title: "Objection library", requestedBy: "Anil Kapoor", requestedById: users.clientuser, requestDate: d0(-25),
+    originalScope: "Free-form roleplay only", requestedChange: "Curated library of objection scenarios", impact: "Adds one feature to AI Integration; no change to delivery date.",
+    estimatedHours: 16, additionalCost: 15000, priority: "MEDIUM", status: "APPROVED", submittedAt: at(-24), resolvedAt: at(-22), clientDecision: "Approved — high value for new reps.", decidedById: users.clientuser,
+  });
+  const crBloom = await cr({
+    projectId: projects.bloom!.id, clientId: clients.bloom!, number: 14, title: "Social login", requestedBy: "Fatima Al Zarooni", requestedById: users.fatima, requestDate: d0(-5),
+    description: "Client wants users to sign in with Google and Microsoft accounts.", originalScope: "Email login", requestedChange: "Google + Microsoft login",
+    impact: "Adds ~2 days to Deployment phase; requires Apple Sign-In as well for App Store compliance.", estimatedHours: 12, additionalCost: 8000, priority: "MEDIUM", status: "PENDING_CLIENT_APPROVAL", submittedAt: at(-4),
+  });
+  const crSchool = await cr({
+    projectId: projects.school!.id, clientId: clients.greenfield!, number: 15, title: "Transport module", requestedBy: "Lakshmi Prasad", requestDate: d0(-2),
+    originalScope: "Admissions, fees, attendance", requestedChange: "Bus routes, stops and GPS tracking for parents", priority: "MEDIUM", status: "UNDER_REVIEW",
+  });
+  counters.change_request = 15;
+  // CR-013's scope addition: the Objection library feature and its tasks are attributed to it.
+  await db.feature.update({ where: { id: projects.aisales!.features["Objection library"] }, data: { changeRequestId: crApex.id } });
+  await db.task.updateMany({ where: { featureId: projects.aisales!.features["Objection library"] }, data: { changeRequestId: crApex.id } });
+  const crAct = (c: { id: string }, p: string, action: string, summary: string, day: number, actor?: string, clientVisible = true) =>
+    activity({ projectId: projects[p]!.id, entityType: "change_request", entityId: c.id, action, summary, createdAt: at(day, 11), actor, meta: { changeRequestId: c.id, ...(clientVisible ? { clientVisible: true } : {}) } });
+  await crAct(crRejected, "aisales", "change_request.created", "CR-012 created: Native mobile apps", -40, "clientuser");
+  await crAct(crRejected, "aisales", "change_request.rejected", "CR-012 rejected by Anil Kapoor", -35, "clientuser");
+  await crAct(crApex, "aisales", "change_request.created", "CR-013 created: Objection library", -25, "clientuser");
+  await crAct(crApex, "aisales", "change_request.approved", "CR-013 approved by Anil Kapoor", -22, "clientuser");
+  await crAct(crApex, "aisales", "change_request.tasks_created", "CR-013 implementation tasks created (2)", -21);
+  await crAct(crBloom, "bloom", "change_request.created", "CR-014 created: Social login", -5, "fatima");
+  await crAct(crBloom, "bloom", "change_request.sent", "CR-014 sent to the client for approval", -4);
+  await crAct(crSchool, "school", "change_request.created", "CR-015 created: Transport module", -2, undefined, false);
 
   // ─── Bugs ───
   const bug = (p: string, title: string, severity: "CRITICAL" | "HIGH" | "MEDIUM", status: "OPEN" | "IN_PROGRESS" | "CLOSED", who: string, created: number) =>
@@ -533,6 +638,10 @@ async function main() {
       { workspaceId: W, userId: owner, kind: "deployment.failed", title: "Staging deployment v0.8.3 failed", body: "Patient Assessment", href: `/projects/${projects.patient!.id}/deployment`, createdAt: at(-1, 18) },
       { workspaceId: W, userId: owner, kind: "change_request.pending", title: "CR-014 awaiting client approval", body: "Bloom Mobile Store · ₹8,000", href: `/projects/${projects.bloom!.id}/change-requests`, createdAt: at(-5, 14), readAt: at(-4) },
       { workspaceId: W, userId: owner, kind: "approval.approved", title: "Client approved Requirements v2", body: "AI Sales Training", href: `/projects/${projects.aisales!.id}/approvals`, createdAt: at(-62, 12), readAt: at(-61) },
+      { workspaceId: W, userId: owner, kind: "approval.changes_requested", title: "Anil Kapoor requested changes to UI Design v2", body: "The score card is hard to read on laptops.", href: `/projects/${projects.aisales!.id}/approvals`, createdAt: at(-46, 12), readAt: at(-45) },
+      { workspaceId: W, userId: users.clientuser!, kind: "approval.requested", title: "Approval requested: UI Design v3", body: "Updated score card as requested — section 3 of the deck.", href: `/approvals`, createdAt: at(-4, 10) },
+      { workspaceId: W, userId: users.suresh!, kind: "approval.requested", title: "Approval requested: Assessment Report Layout v2", href: `/approvals`, createdAt: at(-6, 10) },
+      { workspaceId: W, userId: users.fatima!, kind: "change_request.send", title: "CR-014 requires your review", body: "Social login", href: `/change-requests`, createdAt: at(-4, 11) },
     ],
   });
 

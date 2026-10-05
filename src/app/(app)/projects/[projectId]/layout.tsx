@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { ChevronRight, ExternalLink, GitBranch, Pencil, Plus } from "lucide-react";
 import { pageContext, load, moneyFmt } from "@/server/page-context";
 import { can } from "@/server/authz/context";

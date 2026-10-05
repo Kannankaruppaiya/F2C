@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { pageContext } from "@/server/page-context";
 import { db } from "@/server/db";
 import { projectScope } from "@/server/authz/context";

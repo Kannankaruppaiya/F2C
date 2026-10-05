@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { ChevronRight } from "lucide-react";
 import { StatusBadge } from "@/components/ui/badge";
 import { ProgressCell } from "@/components/ui/progress";

@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState, useTransition, type ReactNode } from "react";
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { useRouter } from "next/navigation";
 import { Bell, ChevronDown, Clock, FolderKanban, LogOut, Menu, Plus, Search, Square } from "lucide-react";
 import type { Role } from "@prisma/client";
@@ -66,8 +66,8 @@ const QUICK_ADD: { label: string; href?: string; action?: "logTime"; key?: strin
   { label: "New Task", href: "/tasks/new", key: "T", permission: "task.create" },
   { label: "Log Time", action: "logTime", permission: "time.log" },
   { label: "New Bug", permission: "bug.create" },
-  { label: "Upload Document", permission: "document.upload" },
-  { label: "New Change Request", permission: "changeRequest.manage" },
+  { label: "Upload Document", href: "/documents", permission: "document.upload" },
+  { label: "New Change Request", href: "/change-requests?new=1", permission: "changeRequest.request" },
   { label: "Create Invoice", permission: "invoice.create" },
   { label: "Record Payment", permission: "payment.record" },
   { label: "Log Expense", permission: "expense.manage" },

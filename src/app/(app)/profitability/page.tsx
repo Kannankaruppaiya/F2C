@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { pageContext, load, moneyFmt } from "@/server/page-context";
 import { requirePermission } from "@/server/authz/context";
 import { listProjects } from "@/server/services/projects";

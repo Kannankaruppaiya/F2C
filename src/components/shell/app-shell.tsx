@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { usePathname } from "next/navigation";
 import { CheckSquare, FolderKanban, LayoutDashboard, MoreHorizontal, Users } from "lucide-react";
 import type { Role } from "@prisma/client";

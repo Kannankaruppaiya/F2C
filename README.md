@@ -32,12 +32,14 @@ npm run dev
 
 Sign in at http://localhost:3000 with `demo@pcc.dev` / `demo-password-2026` (Owner).
 Other demo users share the same password: `priya@pcc.dev` (Developer), `vikram@pcc.dev` (QA),
-`meera@pcc.dev` (Finance), `anil@apexretail.example` (Client: sees only their project, with no financials).
+`meera@pcc.dev` (Finance). Client users (each sees only their own project, shared documents and no financials):
+`anil@apexretail.example` (Apex Retail, has a pending approval), `suresh@kumarclinic.example`, `fatima@bloomorganics.example` (has a change request to review).
 
 | Script | Purpose |
 |---|---|
 | `npm run dev` / `build` / `start` | Next.js |
-| `npm run lint` · `typecheck` · `test` | ESLint (zero warnings) · `tsc` · Vitest |
+| `npm run lint` · `typecheck` · `test` | ESLint (zero warnings) · `tsc` · Vitest (unit + integration against `<db>_test`, created automatically) |
+| `npm run e2e` | Browser walkthroughs (Phase 1 + Phase 3) against a running, seeded app |
 | `npm run db:migrate` | Create/apply a migration in development |
 | `npm run db:deploy` | Apply migrations (CI / production) |
 | `npm run db:seed` | Load demo data, dates relative to today |
@@ -57,11 +59,25 @@ Other demo users share the same password: `priya@pcc.dev` (Developer), `vikram@p
 - **Tasks:** list and board views across projects or within one. The detail page has quick actions (start/stop timer, mark complete, move to review, assign, change priority), subtasks, comments, time tracking with variance warnings, dependencies, and an activity log. A task **can't be completed while its dependencies are open**.
 - **Activity / audit log:** every mutation is recorded. A database trigger rejects `UPDATE`/`DELETE` on `activities`.
 
+**Phase 3: documents and client control** (see [docs/PHASE-3.md](docs/PHASE-3.md)):
+
+- **Documents:** upload to S3-compatible or local storage (never PostgreSQL). Uploads are content-sniffed, size-capped and get generated storage keys. Every revision is an immutable version, numbered server-side. Downloads go through short-lived signed URLs. Clients see only the versions you share.
+- **Approvals:** pinned to the exact version ("Approval requested for Requirements v2"). The assigned client approves, rejects (with a reason) or requests changes (with a comment). Decided approvals are frozen by a database trigger.
+- **Change requests:** a separate workflow from draft through impact, hours and cost to client approval, then implementation. Rejections are kept. Confirm-first implementation tasks are linked to the CR.
+- **Scope protection:** original scope + approved changes = current scope, on the project Overview and Scope tabs.
+- **Audit and notifications:** every action is audited (clients see only client-visible events), with in-app notifications for both sides.
+
 **Live data, view-only for now.** These records are in the schema and seeded, and their editing workflows ship in later phases (each view is labelled):
-bugs (with expected / actual / reproduction steps), versioned documents, approvals pinned to an exact document version, change requests,
-milestones / invoices / payments / expenses, profitability, calendar (month view aggregating every dated obligation), deployments, handover and maintenance.
+bugs (with expected / actual / reproduction steps), milestones / invoices / payments / expenses, profitability, calendar (month view aggregating every dated obligation), deployments, handover and maintenance.
 
 **Planned** (see roadmap pages in the app): reports and export, and the AI assistant / requirement analyzer / proposal generator.
+
+## File storage
+
+Set `STORAGE_DRIVER=local` (default; files go in `./storage`) or `STORAGE_DRIVER=s3` with `S3_BUCKET`, `S3_REGION`,
+`S3_ENDPOINT` (for R2 / MinIO etc.), `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` and `S3_FORCE_PATH_STYLE`. In production with the
+local driver, `STORAGE_SIGNING_SECRET` (32+ characters) is required. Other settings: `MAX_UPLOAD_MB` (default 25) and `SIGNED_URL_TTL_SECONDS`
+(default 300). See `.env.example`.
 
 ## Key design decisions
 
@@ -80,7 +96,9 @@ milestones / invoices / payments / expenses, profitability, calendar (month view
 ## Project layout
 
 ```
-prisma/            schema.prisma, migrations (incl. audit trigger + CHECK constraints), seed.ts
+prisma/            schema.prisma, migrations (audit/version/approval immutability triggers, CHECKs), seed.ts
+e2e/               browser walkthroughs (playwright-core)
+test/              integration-test setup and fixtures
 src/app/           (auth) and (app) route groups, api/v1 REST handlers
 src/components/    ui/ primitives, shell/ (sidebar, topbar, command palette)
 src/features/      module UI + server actions

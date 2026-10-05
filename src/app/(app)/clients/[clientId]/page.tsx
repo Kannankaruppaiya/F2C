@@ -1,10 +1,14 @@
 import type { Metadata } from "next";
 import { Pencil, Plus } from "lucide-react";
 import { pageContext, load, moneyFmt } from "@/server/page-context";
-import { can } from "@/server/authz/context";
+import { can, type AuthContext } from "@/server/authz/context";
+import type { MoneyFormat } from "@/lib/format";
 import { getClient } from "@/server/services/clients";
 import { listActivity } from "@/server/services/activity";
-import { listApprovals, listChangeRequests, listDocuments, listInvoices, listPayments } from "@/server/services/records";
+import { listInvoices, listPayments } from "@/server/services/records";
+import { listDocuments } from "@/server/services/documents";
+import { listApprovals } from "@/server/services/approvals";
+import { listChangeRequests } from "@/server/services/change-requests";
 import { DefinitionList, PageHeader, Panel } from "@/components/ui/panel";
 import { ButtonLink } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
@@ -14,7 +18,10 @@ import { QueryTabs } from "@/components/ui/query-tabs";
 import { ProjectTable } from "@/features/projects/project-table";
 import { ActivityFeed } from "@/features/activity/activity-feed";
 import { Contacts } from "@/features/clients/contacts";
-import { ApprovalTable, ChangeRequestList, DocumentList, InvoiceTable, PaymentTable } from "@/features/records/tables";
+import { InvoiceTable, PaymentTable } from "@/features/records/tables";
+import { DocumentTable } from "@/features/documents/document-table";
+import { ApprovalTable } from "@/features/approvals/approval-table";
+import { ChangeRequestTable } from "@/features/change-requests/cr-table";
 import { CLIENT_STATUS } from "@/lib/status";
 import { todayISO } from "@/lib/dates";
 
@@ -124,13 +131,23 @@ export default async function ClientDetailPage({ params, searchParams }: { param
         {active === "contacts" && (
           <Panel className="max-w-3xl"><Contacts clientId={client.id} contacts={client.contacts} canEdit={canEdit} /></Panel>
         )}
-        {active === "documents" && <Panel><DocumentList rows={await listDocuments(ctx, filter)} showProject /></Panel>}
+        {active === "documents" && <Panel><DocumentTable rows={await listDocuments(ctx, filter)} /></Panel>}
         {active === "invoices" && <Panel><InvoiceTable rows={await listInvoices(ctx, filter)} fmt={fmt} showProject /></Panel>}
         {active === "payments" && <Panel><PaymentTable rows={await listPayments(ctx, filter)} fmt={fmt} showProject /></Panel>}
-        {active === "approvals" && <Panel><ApprovalTable rows={await listApprovals(ctx, filter)} today={today} showProject /></Panel>}
-        {active === "change-requests" && <Panel><ChangeRequestList rows={await listChangeRequests(ctx, filter)} fmt={fmt} showProject /></Panel>}
+        {active === "approvals" && <ClientApprovals ctx={ctx} clientId={client.id} today={today} />}
+        {active === "change-requests" && <ClientChangeRequests ctx={ctx} clientId={client.id} fmt={fmt} />}
         {active === "activity" && <Panel><ActivityFeed items={await listActivity(ctx, { clientId: client.id, limit: 100 })} /></Panel>}
       </div>
     </>
   );
+}
+
+async function ClientApprovals({ ctx, clientId, today }: { ctx: AuthContext; clientId: string; today: string }) {
+  const rows = await listApprovals(ctx, { clientId });
+  return <Panel>{rows.length ? <ApprovalTable rows={rows} today={today} /> : <EmptyState title="No approvals for this client." />}</Panel>;
+}
+
+async function ClientChangeRequests({ ctx, clientId, fmt }: { ctx: AuthContext; clientId: string; fmt: MoneyFormat }) {
+  const rows = await listChangeRequests(ctx, { clientId });
+  return <Panel>{rows.length ? <ChangeRequestTable rows={rows} fmt={fmt} /> : <EmptyState title="No scope changes have been requested." />}</Panel>;
 }

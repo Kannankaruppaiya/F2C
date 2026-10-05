@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useState, useTransition } from "react";
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { CheckSquare, Pencil, Plus, Square, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,7 +23,10 @@ export function FeatureManager({
   canEdit,
   canVerify,
   openNew,
+  changeRequests = [],
 }: {
+  /** Approved change requests a feature can be attributed to. */
+  changeRequests?: { id: string; key: string; title: string }[];
   projectId: string;
   features: FeatureRow[];
   phases: { id: string; name: string }[];
@@ -77,6 +80,7 @@ export function FeatureManager({
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-[13px] font-semibold">{f.name}</span>
                           <Badge tone={PRIORITY[f.priority].tone}>{PRIORITY[f.priority].label}</Badge>
+                          {f.changeRequest && <Link href={`/change-requests/${f.changeRequest.id}`} title="Added to scope by an approved change request"><Badge tone="violet">{f.changeRequest.key}</Badge></Link>}
                           {canEdit ? (
                             <select aria-label={`Status of ${f.name}`} value={f.status} onChange={(e) => run(() => setFeatureStatusAction(projectId, f.id, e.target.value))} className="h-6 rounded border border-line bg-surface px-1 text-2xs">
                               {options(FEATURE_STATUS).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -132,12 +136,26 @@ export function FeatureManager({
         ))
       )}
 
-      {editing && <FeatureDialog projectId={projectId} feature={editing === "new" ? null : editing} phases={phases} features={features} onClose={() => setEditing(null)} />}
+      {editing && <FeatureDialog projectId={projectId} feature={editing === "new" ? null : editing} phases={phases} features={features} changeRequests={changeRequests} onClose={() => setEditing(null)} />}
     </div>
   );
 }
 
-function FeatureDialog({ projectId, feature, phases, features, onClose }: { projectId: string; feature: FeatureRow | null; phases: { id: string; name: string }[]; features: FeatureRow[]; onClose: () => void }) {
+function FeatureDialog({
+  projectId,
+  feature,
+  phases,
+  features,
+  changeRequests,
+  onClose,
+}: {
+  projectId: string;
+  feature: FeatureRow | null;
+  phases: { id: string; name: string }[];
+  features: FeatureRow[];
+  changeRequests: { id: string; key: string; title: string }[];
+  onClose: () => void;
+}) {
   const [state, action, pending] = useActionState(saveFeatureAction.bind(null, projectId, feature?.id ?? null), { ok: false } as ActionState);
   useEffect(() => {
     if (state.ok) onClose();
@@ -166,6 +184,14 @@ function FeatureDialog({ projectId, feature, phases, features, onClose }: { proj
           </Select>
         </Field>
         <Field label="Estimated hours" htmlFor="f-hours" error={fe.estimatedHours}><Input id="f-hours" name="estimatedHours" type="number" min="0" step="0.5" defaultValue={feature?.plannedHours ?? ""} /></Field>
+        {(changeRequests.length > 0 || feature?.changeRequest) && (
+          <Field label="Scope origin" htmlFor="f-cr" error={fe.changeRequestId} hint="Features added by an approved change request count as approved changes, not original scope." className="sm:col-span-2">
+            <Select id="f-cr" name="changeRequestId" defaultValue={feature?.changeRequest?.id ?? ""}>
+              <option value="">Original scope</option>
+              {changeRequests.map((c) => <option key={c.id} value={c.id}>{c.key} · {c.title}</option>)}
+            </Select>
+          </Field>
+        )}
         <Field label="Description" htmlFor="f-desc" error={fe.description} className="sm:col-span-2"><Textarea id="f-desc" name="description" rows={3} defaultValue={feature?.description ?? ""} /></Field>
         <Field label="Acceptance criteria" htmlFor="f-ac" error={fe.acceptanceCriteria} hint="One per line. Verified state is kept for unchanged lines." className="sm:col-span-2">
           <Textarea id="f-ac" name="acceptanceCriteria" rows={5} placeholder={"User can start roleplay\nAI responds as customer\nConversation is stored"} defaultValue={feature?.acceptanceCriteria.map((a) => a.text).join("\n") ?? ""} />

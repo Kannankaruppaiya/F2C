@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { Columns3, List, Plus } from "lucide-react";
 import { can, type AuthContext } from "@/server/authz/context";
 import { listTasks } from "@/server/services/tasks";

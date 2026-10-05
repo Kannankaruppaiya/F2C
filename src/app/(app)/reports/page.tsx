@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { RoadmapPage } from "@/components/ui/roadmap-page";
 
 export const metadata: Metadata = { title: "Reports" };

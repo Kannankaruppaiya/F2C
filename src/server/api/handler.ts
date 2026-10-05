@@ -45,6 +45,10 @@ export function apiHandler<P extends Params = Params>(
         return schema.parse(json);
       };
       const data = await fn({ req, ctx, params, body, query: req.nextUrl.searchParams });
+      if (data instanceof Response) {
+        logger.info("api.request", { requestId, method: req.method, path: req.nextUrl.pathname, status: data.status, ms: Date.now() - started, userId });
+        return data;
+      }
       logger.info("api.request", { requestId, method: req.method, path: req.nextUrl.pathname, status: opts.status ?? 200, ms: Date.now() - started, userId });
       if (data === undefined) return new NextResponse(null, { status: 204 });
       return NextResponse.json({ data }, { status: opts.status ?? 200, headers: { "x-request-id": requestId } });
@@ -77,4 +81,26 @@ function toErrorResponse(err: unknown): { status: number; body: { error: { code:
 /** URLSearchParams → plain object for zod query schemas. */
 export function queryObject(q: URLSearchParams): Record<string, string> {
   return Object.fromEntries(q.entries());
+}
+
+/**
+ * Reads a multipart upload (one "file" field plus text fields). Rejects oversized bodies from the
+ * Content-Length header before reading, and again after (headers can lie or be absent).
+ */
+export async function readUpload(req: NextRequest, maxBytes: number): Promise<{ fields: Record<string, string>; file: { name: string; type: string; bytes: Buffer } }> {
+  const overhead = 64 * 1024; // multipart boundaries and text fields
+  const declared = Number(req.headers.get("content-length") ?? "0");
+  if (declared > maxBytes + overhead) throw new AppError("PAYLOAD_TOO_LARGE", `File exceeds the ${Math.round(maxBytes / 1024 / 1024)} MB limit`);
+  let form: FormData;
+  try {
+    form = await req.formData();
+  } catch {
+    throw new AppError("VALIDATION", "Expected multipart/form-data");
+  }
+  const file = form.get("file");
+  if (!(file instanceof File)) throw new AppError("VALIDATION", "Attach a file", { file: ["Attach a file"] });
+  if (file.size > maxBytes) throw new AppError("PAYLOAD_TOO_LARGE", `File exceeds the ${Math.round(maxBytes / 1024 / 1024)} MB limit`);
+  const fields: Record<string, string> = {};
+  for (const [k, v] of form.entries()) if (typeof v === "string") fields[k] = v;
+  return { fields, file: { name: file.name, type: file.type, bytes: Buffer.from(await file.arrayBuffer()) } };
 }

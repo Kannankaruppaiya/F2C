@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { ChevronRight, Pencil } from "lucide-react";
 import { pageContext, load } from "@/server/page-context";
 import { can } from "@/server/authz/context";

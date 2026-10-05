@@ -1,6 +1,6 @@
 import "server-only";
 import { db } from "@/server/db";
-import { can, projectScope, viaProject, type AuthContext } from "@/server/authz/context";
+import { can, changeRequestScope, documentScope, projectScope, viaProject, type AuthContext } from "@/server/authz/context";
 import { taskKey } from "./tasks";
 
 export interface SearchHit {
@@ -24,7 +24,8 @@ export async function globalSearch(ctx: AuthContext, rawQ: string): Promise<Sear
   const scope = viaProject(ctx);
   const taskNumber = Number(q.replace(/^t-/i, ""));
 
-  const [projects, clients, tasks, features, bugs, invoices] = await Promise.all([
+  const crNumber = Number(q.replace(/^cr-/i, ""));
+  const [projects, clients, tasks, features, bugs, invoices, documents, changeRequests] = await Promise.all([
     db.project.findMany({
       where: { AND: [projectScope(ctx), { OR: [{ name: contains }, { code: contains }] }] },
       select: { id: true, name: true, code: true, client: { select: { name: true } } },
@@ -63,6 +64,16 @@ export async function globalSearch(ctx: AuthContext, rawQ: string): Promise<Sear
           take: LIMIT,
         })
       : Promise.resolve([]),
+    db.document.findMany({
+      where: { AND: [documentScope(ctx), { name: contains }] },
+      select: { id: true, name: true, project: { select: { name: true } }, client: { select: { name: true } } },
+      take: LIMIT,
+    }),
+    db.changeRequest.findMany({
+      where: { AND: [changeRequestScope(ctx), { OR: [{ title: contains }, ...(Number.isInteger(crNumber) && crNumber > 0 ? [{ number: crNumber }] : [])] }] },
+      select: { id: true, number: true, title: true, project: { select: { name: true } } },
+      take: LIMIT,
+    }),
   ]);
 
   const groups: SearchGroup[] = [
@@ -70,6 +81,8 @@ export async function globalSearch(ctx: AuthContext, rawQ: string): Promise<Sear
     { label: "Clients", hits: clients.map((c) => ({ id: c.id, title: c.name, subtitle: c.company ?? undefined, href: `/clients/${c.id}` })) },
     { label: "Tasks", hits: tasks.map((t) => ({ id: t.id, title: t.title, subtitle: `${taskKey(t.number)} · ${t.project.name}`, href: `/tasks/${t.id}` })) },
     { label: "Features", hits: features.map((f) => ({ id: f.id, title: f.name, subtitle: f.project.name, href: `/projects/${f.projectId}/features#${f.id}` })) },
+    { label: "Documents", hits: documents.map((d) => ({ id: d.id, title: d.name, subtitle: d.project?.name ?? d.client?.name ?? undefined, href: `/documents/${d.id}` })) },
+    { label: "Change Requests", hits: changeRequests.map((c) => ({ id: c.id, title: c.title, subtitle: `CR-${String(c.number).padStart(3, "0")} · ${c.project.name}`, href: `/change-requests/${c.id}` })) },
     { label: "Bugs", hits: bugs.map((b) => ({ id: b.id, title: b.title, subtitle: `BUG-${b.number} · ${b.project.name}`, href: `/projects/${b.projectId}/bugs` })) },
     { label: "Invoices", hits: invoices.map((i) => ({ id: i.id, title: i.number, subtitle: i.project.name, href: `/projects/${i.projectId}/payments` })) },
   ];

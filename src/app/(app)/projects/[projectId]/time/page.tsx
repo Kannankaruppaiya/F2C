@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { pageContext, load } from "@/server/page-context";
 import { getProject } from "@/server/services/projects";
 import { listTimeEntries } from "@/server/services/records";

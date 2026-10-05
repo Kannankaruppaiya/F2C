@@ -12,12 +12,17 @@
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
     "db:reset": "prisma migrate reset --force",
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e": "node e2e/walkthrough.mjs && node e2e/phase3.mjs",
+    "e2e:phase1": "node e2e/walkthrough.mjs",
+    "e2e:phase3": "node e2e/phase3.mjs"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1146.0",
+    "@aws-sdk/s3-request-presigner": "^3.1146.0",
     "@prisma/client": "^6.19.3",
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
@@ -37,6 +42,7 @@
     "@types/react-dom": "^19.3.0",
     "eslint": "^9.39.5",
     "eslint-config-next": "^15.5.27",
+    "playwright-core": "1.56",
     "postcss": "^8.5.28",
     "prisma": "^6.19.3",
     "tailwindcss": "^4.3.3",

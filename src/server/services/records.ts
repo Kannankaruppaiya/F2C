@@ -3,7 +3,7 @@ import "server-only";
 // arrive in later phases; these queries already enforce the same scoping and permissions.
 import type { Prisma } from "@prisma/client";
 import { db } from "@/server/db";
-import { can, requirePermission, viaProject, type AuthContext } from "@/server/authz/context";
+import { approvalScope, can, changeRequestScope, documentScope, requirePermission, viaProject, type AuthContext } from "@/server/authz/context";
 import { forbidden } from "@/server/errors";
 import { isInvoiceOverdue } from "@/server/domain/finance";
 import { todayISO, toISODate } from "@/lib/dates";
@@ -89,94 +89,6 @@ export async function listExpenses(ctx: AuthContext, f: RecordFilter = {}) {
   requirePermission(ctx, "finance.view");
   const rows = await db.expense.findMany({ where: { ...scoped(ctx, f), deletedAt: null }, include: { project: projectRef }, orderBy: { incurredOn: "desc" } });
   return rows.map((e) => ({ id: e.id, category: e.category, description: e.description, amount: num(e.amount), date: toISODate(e.incurredOn)!, vendor: e.vendor, project: e.project }));
-}
-
-export async function listApprovals(ctx: AuthContext, f: RecordFilter = {}) {
-  requirePermission(ctx, "project.view");
-  const rows = await db.approval.findMany({
-    where: scoped(ctx, f),
-    include: {
-      project: projectRef,
-      client: { select: { name: true } },
-      feature: { select: { name: true } },
-      documentVersion: { select: { version: true, document: { select: { name: true } } } },
-    },
-    orderBy: [{ status: "asc" }, { requestedAt: "desc" }],
-  });
-  return rows.map((a) => ({
-    id: a.id,
-    key: `APR-${String(a.number).padStart(3, "0")}`,
-    title: a.title,
-    status: a.status,
-    project: a.project,
-    client: a.client.name,
-    document: a.documentVersion ? `${a.documentVersion.document.name} v${a.documentVersion.version}` : null,
-    feature: a.feature?.name ?? null,
-    requestedAt: a.requestedAt.toISOString(),
-    dueDate: toISODate(a.dueDate),
-    decidedBy: a.decidedByName,
-    decidedAt: a.decidedAt?.toISOString() ?? null,
-    comments: a.comments,
-  }));
-}
-
-export async function listChangeRequests(ctx: AuthContext, f: RecordFilter = {}) {
-  requirePermission(ctx, "project.view");
-  const rows = await db.changeRequest.findMany({
-    where: { ...scoped(ctx, f), deletedAt: null },
-    include: { project: projectRef, _count: { select: { tasks: true } } },
-    orderBy: { number: "desc" },
-  });
-  return rows.map((c) => ({
-    id: c.id,
-    key: `CR-${String(c.number).padStart(3, "0")}`,
-    title: c.title,
-    status: c.status,
-    priority: c.priority,
-    project: c.project,
-    requestedBy: c.requestedBy,
-    requestDate: toISODate(c.requestDate)!,
-    originalScope: c.originalScope,
-    requestedChange: c.requestedChange,
-    impact: c.impact,
-    additionalHours: num(c.additionalHours),
-    // A CR's price is quoted to the client, so it is not internal financial data.
-    additionalCost: num(c.additionalCost),
-    taskCount: c._count.tasks,
-  }));
-}
-
-export async function listDocuments(ctx: AuthContext, f: RecordFilter = {}) {
-  requirePermission(ctx, "project.view");
-  const rows = await db.document.findMany({
-    where: { ...scoped(ctx, f), deletedAt: null },
-    include: {
-      project: projectRef,
-      phase: { select: { name: true } },
-      versions: { orderBy: { version: "desc" }, include: { uploadedBy: { select: { name: true } } } },
-    },
-    orderBy: [{ category: "asc" }, { name: "asc" }],
-  });
-  return rows.map((d) => ({
-    id: d.id,
-    name: d.name,
-    category: d.category,
-    status: d.status,
-    project: d.project,
-    phase: d.phase?.name ?? null,
-    currentVersion: d.versions[0]?.version ?? null,
-    updatedAt: (d.versions[0]?.createdAt ?? d.updatedAt).toISOString(),
-    versions: d.versions.map((v) => ({
-      id: v.id,
-      version: v.version,
-      fileName: v.fileName,
-      sizeBytes: v.sizeBytes,
-      status: v.status,
-      uploadedBy: v.uploadedBy?.name ?? null,
-      createdAt: v.createdAt.toISOString(),
-      changeNotes: v.changeNotes,
-    })),
-  }));
 }
 
 export async function listBugs(ctx: AuthContext, f: RecordFilter = {}) {
@@ -270,15 +182,15 @@ export async function listTimeEntries(ctx: AuthContext, projectId: string) {
   }));
 }
 
-/** Counts used for tab badges on the project detail page. */
+/** Counts used for tab badges on the project detail page (same scopes as the lists). */
 export async function projectTabCounts(ctx: AuthContext, projectId: string) {
   const s = scoped(ctx, { projectId });
   const [tasks, bugs, approvals, crs, docs] = await Promise.all([
     db.task.count({ where: { ...s, deletedAt: null, status: { not: "DONE" } } }),
     db.bug.count({ where: { ...s, deletedAt: null, status: { not: "CLOSED" } } }),
-    db.approval.count({ where: { ...s, status: "PENDING" } }),
-    db.changeRequest.count({ where: { ...s, deletedAt: null, status: { in: ["PENDING_CLIENT_APPROVAL", "PENDING_INTERNAL_REVIEW", "DRAFT"] } } }),
-    db.document.count({ where: { ...s, deletedAt: null } }),
+    db.approval.count({ where: { AND: [approvalScope(ctx), { projectId, status: "PENDING" }] } }),
+    db.changeRequest.count({ where: { AND: [changeRequestScope(ctx), { projectId, status: { in: ["DRAFT", "UNDER_REVIEW", "PENDING_CLIENT_APPROVAL"] } }] } }),
+    db.document.count({ where: { AND: [documentScope(ctx), { projectId, status: { not: "ARCHIVED" } }] } }),
   ]);
   return { tasks, bugs, approvals, crs, docs };
 }

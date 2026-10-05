@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { pageContext } from "@/server/page-context";
 import { getCalendar, type CalendarKind } from "@/server/services/calendar";

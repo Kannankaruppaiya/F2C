@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { cn } from "@/lib/cn";
 

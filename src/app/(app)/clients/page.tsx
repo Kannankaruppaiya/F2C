@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { Plus } from "lucide-react";
 import { pageContext, load, moneyFmt } from "@/server/page-context";
 import { can, requirePermission } from "@/server/authz/context";

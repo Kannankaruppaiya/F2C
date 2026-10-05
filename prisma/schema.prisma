@@ -107,10 +107,11 @@ enum DocumentCategory {
   API
   DATABASE
   QA
-  CLIENT_APPROVALS
-  INVOICES
+  APPROVAL
+  INVOICE
   DEPLOYMENT
   HANDOVER
+  OTHER
 }
 
 enum DocumentStatus {
@@ -127,11 +128,12 @@ enum ApprovalStatus {
   APPROVED
   REJECTED
   CHANGES_REQUESTED
+  CANCELLED
 }
 
 enum ChangeRequestStatus {
   DRAFT
-  PENDING_INTERNAL_REVIEW
+  UNDER_REVIEW
   PENDING_CLIENT_APPROVAL
   APPROVED
   REJECTED
@@ -215,21 +217,26 @@ model User {
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
-  memberships     WorkspaceMember[]
-  sessions        Session[]
-  projectMembers  ProjectMember[]
-  managedProjects Project[]         @relation("ProjectManager")
-  assignedTasks   Task[]            @relation("TaskAssignee")
-  createdTasks    Task[]            @relation("TaskCreator")
-  assignedBugs    Bug[]             @relation("BugAssignee")
-  reportedBugs    Bug[]             @relation("BugReporter")
-  taskComments    TaskComment[]
-  timeEntries     TimeEntry[]
-  activities      Activity[]
-  notifications   Notification[]
-  uploadedVersions DocumentVersion[]
-  deployments     Deployment[]
-  subtasks        Subtask[]
+  memberships        WorkspaceMember[]
+  sessions           Session[]
+  projectMembers     ProjectMember[]
+  managedProjects    Project[]         @relation("ProjectManager")
+  assignedTasks      Task[]            @relation("TaskAssignee")
+  createdTasks       Task[]            @relation("TaskCreator")
+  assignedBugs       Bug[]             @relation("BugAssignee")
+  reportedBugs       Bug[]             @relation("BugReporter")
+  taskComments       TaskComment[]
+  timeEntries        TimeEntry[]
+  activities         Activity[]
+  notifications      Notification[]
+  uploadedVersions   DocumentVersion[]
+  createdDocuments   Document[]        @relation("DocumentCreator")
+  requestedApprovals Approval[]        @relation("ApprovalRequester")
+  assignedApprovals  Approval[]        @relation("ApprovalApprover")
+  requestedChanges   ChangeRequest[]   @relation("ChangeRequestRequester")
+  decidedChanges     ChangeRequest[]   @relation("ChangeRequestDecider")
+  deployments        Deployment[]
+  subtasks           Subtask[]
 
   @@map("users")
 }
@@ -254,49 +261,49 @@ model Session {
 }
 
 model Workspace {
-  id                   String   @id @default(cuid())
-  name                 String
-  slug                 String   @unique
-  currency             String   @default("INR")
-  locale               String   @default("en-IN")
-  timezone             String   @default("Asia/Kolkata")
-  defaultTaxRate       Decimal  @default(18) @map("default_tax_rate") @db.Decimal(5, 2)
+  id                String   @id @default(cuid())
+  name              String
+  slug              String   @unique
+  currency          String   @default("INR")
+  locale            String   @default("en-IN")
+  timezone          String   @default("Asia/Kolkata")
+  defaultTaxRate    Decimal  @default(18) @map("default_tax_rate") @db.Decimal(5, 2)
   // Internal cost of one hour of effort, used for actual-cost / profitability.
-  defaultHourlyCost    Decimal  @default(0) @map("default_hourly_cost") @db.Decimal(14, 2)
-  invoicePrefix        String   @default("INV") @map("invoice_prefix")
-  createdAt            DateTime @default(now()) @map("created_at")
-  updatedAt            DateTime @updatedAt @map("updated_at")
+  defaultHourlyCost Decimal  @default(0) @map("default_hourly_cost") @db.Decimal(14, 2)
+  invoicePrefix     String   @default("INV") @map("invoice_prefix")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
 
-  members         WorkspaceMember[]
-  sessions        Session[]
-  counters        WorkspaceCounter[]
-  clients         Client[]
-  clientContacts  ClientContact[]
-  projects        Project[]
-  projectMembers  ProjectMember[]
-  phases          Phase[]
-  features        Feature[]
-  tasks           Task[]
-  subtasks        Subtask[]
-  taskComments    TaskComment[]
-  bugs            Bug[]
-  documents       Document[]
-  documentVersions DocumentVersion[]
-  approvals       Approval[]
-  changeRequests  ChangeRequest[]
-  milestones      Milestone[]
-  invoices        Invoice[]
-  invoiceItems    InvoiceItem[]
-  payments        Payment[]
-  expenses        Expense[]
-  timeEntries     TimeEntry[]
-  deployments     Deployment[]
-  handoverItems   HandoverItem[]
-  maintenancePlans MaintenancePlan[]
-  supportRequests SupportRequest[]
-  calendarEvents  CalendarEvent[]
-  activities      Activity[]
-  notifications   Notification[]
+  members            WorkspaceMember[]
+  sessions           Session[]
+  counters           WorkspaceCounter[]
+  clients            Client[]
+  clientContacts     ClientContact[]
+  projects           Project[]
+  projectMembers     ProjectMember[]
+  phases             Phase[]
+  features           Feature[]
+  tasks              Task[]
+  subtasks           Subtask[]
+  taskComments       TaskComment[]
+  bugs               Bug[]
+  documents          Document[]
+  documentVersions   DocumentVersion[]
+  approvals          Approval[]
+  changeRequests     ChangeRequest[]
+  milestones         Milestone[]
+  invoices           Invoice[]
+  invoiceItems       InvoiceItem[]
+  payments           Payment[]
+  expenses           Expense[]
+  timeEntries        TimeEntry[]
+  deployments        Deployment[]
+  handoverItems      HandoverItem[]
+  maintenancePlans   MaintenancePlan[]
+  supportRequests    SupportRequest[]
+  calendarEvents     CalendarEvent[]
+  activities         Activity[]
+  notifications      Notification[]
   acceptanceCriteria AcceptanceCriterion[]
 
   @@map("workspaces")
@@ -360,6 +367,7 @@ model Client {
   approvals      Approval[]
   changeRequests ChangeRequest[]
   invoices       Invoice[]
+  documents      Document[]
 
   @@index([workspaceId, status])
   @@index([workspaceId, name])
@@ -459,20 +467,20 @@ model ProjectMember {
 }
 
 model Phase {
-  id               String      @id @default(cuid())
-  workspaceId      String      @map("workspace_id")
-  projectId        String      @map("project_id")
-  name             String
-  description      String?
-  position         Int
-  status           PhaseStatus @default(NOT_STARTED)
-  startDate        DateTime?   @map("start_date") @db.Date
-  endDate          DateTime?   @map("end_date") @db.Date
-  budget           Decimal?    @db.Decimal(14, 2)
-  estimatedHours   Decimal     @default(0) @map("estimated_hours") @db.Decimal(8, 2)
-  createdAt        DateTime    @default(now()) @map("created_at")
-  updatedAt        DateTime    @updatedAt @map("updated_at")
-  deletedAt        DateTime?   @map("deleted_at")
+  id             String      @id @default(cuid())
+  workspaceId    String      @map("workspace_id")
+  projectId      String      @map("project_id")
+  name           String
+  description    String?
+  position       Int
+  status         PhaseStatus @default(NOT_STARTED)
+  startDate      DateTime?   @map("start_date") @db.Date
+  endDate        DateTime?   @map("end_date") @db.Date
+  budget         Decimal?    @db.Decimal(14, 2)
+  estimatedHours Decimal     @default(0) @map("estimated_hours") @db.Decimal(8, 2)
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+  deletedAt      DateTime?   @map("deleted_at")
 
   workspace    Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   project      Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -502,23 +510,25 @@ model PhaseDependency {
 }
 
 model Feature {
-  id             String        @id @default(cuid())
-  workspaceId    String        @map("workspace_id")
-  projectId      String        @map("project_id")
-  phaseId        String        @map("phase_id")
-  name           String
-  description    String?
-  priority       Priority      @default(MEDIUM)
-  status         FeatureStatus @default(BACKLOG)
-  estimatedHours Decimal       @default(0) @map("estimated_hours") @db.Decimal(8, 2)
-  position       Int           @default(0)
-  createdAt      DateTime      @default(now()) @map("created_at")
-  updatedAt      DateTime      @updatedAt @map("updated_at")
-  deletedAt      DateTime?     @map("deleted_at")
+  id              String        @id @default(cuid())
+  workspaceId     String        @map("workspace_id")
+  projectId       String        @map("project_id")
+  phaseId         String        @map("phase_id")
+  changeRequestId String?       @map("change_request_id")
+  name            String
+  description     String?
+  priority        Priority      @default(MEDIUM)
+  status          FeatureStatus @default(BACKLOG)
+  estimatedHours  Decimal       @default(0) @map("estimated_hours") @db.Decimal(8, 2)
+  position        Int           @default(0)
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  deletedAt       DateTime?     @map("deleted_at")
 
   workspace          Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   project            Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
   phase              Phase                 @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  changeRequest      ChangeRequest?        @relation(fields: [changeRequestId], references: [id], onDelete: SetNull)
   tasks              Task[]
   bugs               Bug[]
   documents          Document[]
@@ -531,6 +541,7 @@ model Feature {
   @@index([projectId, status])
   @@index([phaseId])
   @@index([workspaceId])
+  @@index([changeRequestId])
   @@map("features")
 }
 
@@ -606,6 +617,7 @@ model Task {
   @@index([workspaceId, dueDate])
   @@index([phaseId])
   @@index([featureId])
+  @@index([changeRequestId])
   @@map("tasks")
 }
 
@@ -621,15 +633,15 @@ model TaskDependency {
 }
 
 model Subtask {
-  id          String    @id @default(cuid())
-  workspaceId String    @map("workspace_id")
-  taskId      String    @map("task_id")
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  taskId      String   @map("task_id")
   title       String
-  isDone      Boolean   @default(false) @map("is_done")
-  assigneeId  String?   @map("assignee_id")
-  position    Int       @default(0)
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  isDone      Boolean  @default(false) @map("is_done")
+  assigneeId  String?  @map("assignee_id")
+  position    Int      @default(0)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   task      Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
@@ -659,28 +671,28 @@ model TaskComment {
 // ───────────────────────────── QA ─────────────────────────────
 
 model Bug {
-  id                String       @id @default(cuid())
-  workspaceId       String       @map("workspace_id")
-  projectId         String       @map("project_id")
-  phaseId           String?      @map("phase_id")
-  featureId         String?      @map("feature_id")
-  taskId            String?      @map("task_id")
-  number            Int
-  title             String
-  severity          BugSeverity  @default(MEDIUM)
-  priority          Priority     @default(MEDIUM)
-  environment       Environment  @default(STAGING)
-  stepsToReproduce  String?      @map("steps_to_reproduce")
-  expectedResult    String?      @map("expected_result")
-  actualResult      String?      @map("actual_result")
-  status            BugStatus    @default(OPEN)
-  assigneeId        String?      @map("assignee_id")
-  reporterId        String?      @map("reporter_id")
-  fixedAt           DateTime?    @map("fixed_at")
-  retestResult      String?      @map("retest_result")
-  createdAt         DateTime     @default(now()) @map("created_at")
-  updatedAt         DateTime     @updatedAt @map("updated_at")
-  deletedAt         DateTime?    @map("deleted_at")
+  id               String      @id @default(cuid())
+  workspaceId      String      @map("workspace_id")
+  projectId        String      @map("project_id")
+  phaseId          String?     @map("phase_id")
+  featureId        String?     @map("feature_id")
+  taskId           String?     @map("task_id")
+  number           Int
+  title            String
+  severity         BugSeverity @default(MEDIUM)
+  priority         Priority    @default(MEDIUM)
+  environment      Environment @default(STAGING)
+  stepsToReproduce String?     @map("steps_to_reproduce")
+  expectedResult   String?     @map("expected_result")
+  actualResult     String?     @map("actual_result")
+  status           BugStatus   @default(OPEN)
+  assigneeId       String?     @map("assignee_id")
+  reporterId       String?     @map("reporter_id")
+  fixedAt          DateTime?   @map("fixed_at")
+  retestResult     String?     @map("retest_result")
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
+  deletedAt        DateTime?   @map("deleted_at")
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -698,114 +710,151 @@ model Bug {
 
 // ───────────────────────────── Documents & client control ─────────────────────────────
 
+// A document is owned by exactly one of: a project (client derived via the project) or a client
+// directly (client-level documents). Enforced by CHECK constraint documents_single_owner.
 model Document {
   id               String           @id @default(cuid())
   workspaceId      String           @map("workspace_id")
-  projectId        String           @map("project_id")
+  projectId        String?          @map("project_id")
+  clientId         String?          @map("client_id")
   phaseId          String?          @map("phase_id")
   featureId        String?          @map("feature_id")
+  changeRequestId  String?          @map("change_request_id")
   name             String
+  description      String?
   category         DocumentCategory
   status           DocumentStatus   @default(DRAFT)
   currentVersionId String?          @unique @map("current_version_id")
+  createdById      String?          @map("created_by_id")
   createdAt        DateTime         @default(now()) @map("created_at")
   updatedAt        DateTime         @updatedAt @map("updated_at")
   deletedAt        DateTime?        @map("deleted_at")
 
   workspace      Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  project        Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project        Project?          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  client         Client?           @relation(fields: [clientId], references: [id], onDelete: Restrict)
   phase          Phase?            @relation(fields: [phaseId], references: [id], onDelete: SetNull)
   feature        Feature?          @relation(fields: [featureId], references: [id], onDelete: SetNull)
+  changeRequest  ChangeRequest?    @relation(fields: [changeRequestId], references: [id], onDelete: SetNull)
+  createdBy      User?             @relation("DocumentCreator", fields: [createdById], references: [id], onDelete: SetNull)
   versions       DocumentVersion[] @relation("DocumentVersions")
   currentVersion DocumentVersion?  @relation("DocumentCurrentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  approvals      Approval[]
 
   @@index([projectId, category])
-  @@index([workspaceId])
+  @@index([clientId])
+  @@index([workspaceId, status])
   @@map("documents")
 }
 
-// Versions are immutable once created: a new upload always creates a new row.
+// Versions are immutable: file columns cannot change after insert (DB trigger
+// document_versions_immutable). Only review `status` and client visibility `sharedAt` may change.
 model DocumentVersion {
-  id           String         @id @default(cuid())
-  workspaceId  String         @map("workspace_id")
-  documentId   String         @map("document_id")
-  version      Int
-  fileName     String         @map("file_name")
-  storagePath  String         @map("storage_path")
-  mimeType     String         @map("mime_type")
-  sizeBytes    Int            @map("size_bytes")
-  checksum     String?
-  changeNotes  String?        @map("change_notes")
-  uploadedById String?        @map("uploaded_by_id")
-  status       DocumentStatus @default(DRAFT)
-  createdAt    DateTime       @default(now()) @map("created_at")
+  id               String         @id @default(cuid())
+  workspaceId      String         @map("workspace_id")
+  documentId       String         @map("document_id")
+  versionNumber    Int            @map("version_number")
+  storageKey       String         @unique @map("storage_key")
+  originalFilename String         @map("original_filename")
+  mimeType         String         @map("mime_type")
+  fileSize         Int            @map("file_size")
+  checksum         String?
+  changeSummary    String?        @map("change_summary")
+  uploadedById     String?        @map("uploaded_by_id")
+  status           DocumentStatus @default(DRAFT)
+  sharedAt         DateTime?      @map("shared_at")
+  createdAt        DateTime       @default(now()) @map("created_at")
 
-  workspace       Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  document        Document   @relation("DocumentVersions", fields: [documentId], references: [id], onDelete: Cascade)
-  currentOf       Document?  @relation("DocumentCurrentVersion")
-  uploadedBy      User?      @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
-  approvals       Approval[]
+  workspace  Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  document   Document   @relation("DocumentVersions", fields: [documentId], references: [id], onDelete: Cascade)
+  currentOf  Document?  @relation("DocumentCurrentVersion")
+  uploadedBy User?      @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  approvals  Approval[]
 
-  @@unique([documentId, version])
+  @@unique([documentId, versionNumber])
   @@map("document_versions")
 }
 
+// Pinned to an exact document version. Decided approvals are immutable (DB trigger approvals_immutable).
 model Approval {
   id                String         @id @default(cuid())
   workspaceId       String         @map("workspace_id")
   projectId         String         @map("project_id")
   clientId          String         @map("client_id")
-  documentVersionId String?        @map("document_version_id")
+  documentId        String         @map("document_id")
+  documentVersionId String         @map("document_version_id")
   featureId         String?        @map("feature_id")
   number            Int
   title             String
   status            ApprovalStatus @default(PENDING)
+  requesterId       String?        @map("requester_id")
+  approverId        String?        @map("approver_id")
+  requestMessage    String?        @map("request_message")
   requestedAt       DateTime       @default(now()) @map("requested_at")
   dueDate           DateTime?      @map("due_date") @db.Date
-  decidedByName     String?        @map("decided_by_name")
-  decidedAt         DateTime?      @map("decided_at")
+  viewedAt          DateTime?      @map("viewed_at")
+  respondedByName   String?        @map("responded_by_name")
+  respondedAt       DateTime?      @map("responded_at")
   comments          String?
   createdAt         DateTime       @default(now()) @map("created_at")
   updatedAt         DateTime       @updatedAt @map("updated_at")
 
-  workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  project         Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  client          Client           @relation(fields: [clientId], references: [id], onDelete: Restrict)
-  documentVersion DocumentVersion? @relation(fields: [documentVersionId], references: [id], onDelete: Restrict)
-  feature         Feature?         @relation(fields: [featureId], references: [id], onDelete: SetNull)
+  workspace       Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project         Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  client          Client          @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  document        Document        @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  documentVersion DocumentVersion @relation(fields: [documentVersionId], references: [id], onDelete: Restrict)
+  feature         Feature?        @relation(fields: [featureId], references: [id], onDelete: SetNull)
+  requester       User?           @relation("ApprovalRequester", fields: [requesterId], references: [id], onDelete: SetNull)
+  approver        User?           @relation("ApprovalApprover", fields: [approverId], references: [id], onDelete: SetNull)
 
   @@unique([workspaceId, number])
   @@index([workspaceId, status])
   @@index([projectId, status])
+  @@index([documentId])
+  @@index([approverId, status])
   @@map("approvals")
 }
 
+// A change request is NOT a task. additional_cost is the single source of the extra fee (Phase 4
+// invoices from it). Rejected/cancelled CRs are kept forever.
 model ChangeRequest {
-  id              String              @id @default(cuid())
-  workspaceId     String              @map("workspace_id")
-  projectId       String              @map("project_id")
-  clientId        String              @map("client_id")
-  number          Int
-  title           String
-  requestedBy     String?             @map("requested_by")
-  requestDate     DateTime            @default(now()) @map("request_date") @db.Date
-  description     String?
-  originalScope   String?             @map("original_scope")
-  requestedChange String?             @map("requested_change")
-  additionalHours Decimal             @default(0) @map("additional_hours") @db.Decimal(8, 2)
-  additionalCost  Decimal             @default(0) @map("additional_cost") @db.Decimal(14, 2)
-  impact          String?
-  priority        Priority            @default(MEDIUM)
-  status          ChangeRequestStatus @default(DRAFT)
-  decidedAt       DateTime?           @map("decided_at")
-  createdAt       DateTime            @default(now()) @map("created_at")
-  updatedAt       DateTime            @updatedAt @map("updated_at")
-  deletedAt       DateTime?           @map("deleted_at")
+  id                 String              @id @default(cuid())
+  workspaceId        String              @map("workspace_id")
+  projectId          String              @map("project_id")
+  clientId           String              @map("client_id")
+  number             Int
+  title              String
+  requestedBy        String?             @map("requested_by")
+  requestedById      String?             @map("requested_by_id")
+  requestDate        DateTime            @default(now()) @map("request_date") @db.Date
+  description        String?
+  originalScope      String?             @map("original_scope")
+  requestedChange    String?             @map("requested_change")
+  estimatedHours     Decimal             @default(0) @map("estimated_hours") @db.Decimal(8, 2)
+  additionalCost     Decimal             @default(0) @map("additional_cost") @db.Decimal(14, 2)
+  impact             String?
+  priority           Priority            @default(MEDIUM)
+  status             ChangeRequestStatus @default(DRAFT)
+  clientDecision     String?             @map("client_decision")
+  decidedById        String?             @map("decided_by_id")
+  decisionOnBehalf   Boolean             @default(false) @map("decision_on_behalf")
+  cancellationReason String?             @map("cancellation_reason")
+  submittedAt        DateTime?           @map("submitted_at")
+  resolvedAt         DateTime?           @map("resolved_at")
+  implementedAt      DateTime?           @map("implemented_at")
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+  deletedAt          DateTime?           @map("deleted_at")
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  client    Client    @relation(fields: [clientId], references: [id], onDelete: Restrict)
-  tasks     Task[]
+  workspace       Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project         Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  client          Client     @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  requestedByUser User?      @relation("ChangeRequestRequester", fields: [requestedById], references: [id], onDelete: SetNull)
+  decidedBy       User?      @relation("ChangeRequestDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+  tasks           Task[]
+  features        Feature[]
+  documents       Document[]
 
   @@unique([workspaceId, number])
   @@index([projectId, status])
@@ -1003,17 +1052,17 @@ model HandoverItem {
 }
 
 model MaintenancePlan {
-  id            String    @id @default(cuid())
-  workspaceId   String    @map("workspace_id")
-  projectId     String    @unique @map("project_id")
+  id            String   @id @default(cuid())
+  workspaceId   String   @map("workspace_id")
+  projectId     String   @unique @map("project_id")
   plan          String
-  startDate     DateTime  @map("start_date") @db.Date
-  endDate       DateTime  @map("end_date") @db.Date
-  monthlyCost   Decimal   @map("monthly_cost") @db.Decimal(14, 2)
-  includedHours Decimal   @map("included_hours") @db.Decimal(6, 2)
-  supportLevel  String    @map("support_level")
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
+  startDate     DateTime @map("start_date") @db.Date
+  endDate       DateTime @map("end_date") @db.Date
+  monthlyCost   Decimal  @map("monthly_cost") @db.Decimal(14, 2)
+  includedHours Decimal  @map("included_hours") @db.Decimal(6, 2)
+  supportLevel  String   @map("support_level")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
   workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   project         Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)

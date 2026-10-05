@@ -116,6 +116,8 @@ const featureBase = z.object({
   estimatedHours: hours,
   acceptanceCriteria: z.array(z.string().trim().min(1).max(500)).max(50).default([]),
   dependsOnIds: z.array(id).max(20).default([]),
+  /** Set when the feature was added to scope by an approved change request. */
+  changeRequestId: optionalId,
 });
 export const featureCreateSchema = featureBase;
 export const featureUpdateSchema = featureBase.partial();
@@ -160,3 +162,117 @@ export const timeEntrySchema = z.object({
 
 export const commentSchema = z.object({ body: requiredText(5000) });
 export const subtaskSchema = z.object({ title: requiredText(200) });
+
+// ─── Phase 3: documents, approvals, change requests ───
+export const documentCategory = z.enum(["REQUIREMENTS", "PROPOSAL", "SCOPE", "UI_UX", "TECHNICAL", "API", "DATABASE", "QA", "APPROVAL", "INVOICE", "DEPLOYMENT", "HANDOVER", "OTHER"]);
+export const documentStatus = z.enum(["DRAFT", "INTERNAL_REVIEW", "SENT_TO_CLIENT", "APPROVED", "REJECTED", "ARCHIVED"]);
+const checkbox = z.preprocess((v) => v === "on" || v === true || v === "true" || v === "1", z.boolean());
+
+export const documentCreateSchema = z
+  .object({
+    projectId: optionalId,
+    clientId: optionalId,
+    phaseId: optionalId,
+    featureId: optionalId,
+    changeRequestId: optionalId,
+    name: requiredText(160),
+    description: optionalText(5000),
+    category: documentCategory,
+    changeSummary: optionalText(1000),
+    share: checkbox.default(false),
+  })
+  .refine((v) => !!v.projectId !== !!v.clientId, { message: "Choose a project, or a client for client-level documents", path: ["projectId"] });
+
+export const documentUpdateSchema = z.object({
+  name: requiredText(160),
+  description: optionalText(5000),
+  category: documentCategory,
+  phaseId: optionalId,
+  featureId: optionalId,
+  changeRequestId: optionalId,
+}).partial();
+
+export const versionUploadSchema = z.object({
+  changeSummary: optionalText(1000),
+  share: checkbox.default(false),
+});
+
+export const documentListQuery = z.object({
+  q: z.string().max(100).optional(),
+  category: documentCategory.optional(),
+  status: documentStatus.optional(),
+  projectId: z.string().max(64).optional(),
+  phaseId: z.string().max(64).optional(),
+  clientId: z.string().max(64).optional(),
+  sort: z.enum(["updated", "name", "category"]).default("updated"),
+  /** Defaults: newest first for "updated", A→Z otherwise. */
+  dir: z.enum(["asc", "desc"]).optional(),
+});
+
+export const approvalRequestSchema = z.object({
+  documentId: id,
+  approverId: id,
+  dueDate: optionalDate,
+  message: optionalText(2000),
+});
+
+export const approvalListQuery = z.object({
+  status: z.enum(["PENDING", "APPROVED", "REJECTED", "CHANGES_REQUESTED", "CANCELLED"]).optional(),
+  projectId: z.string().max(64).optional(),
+  documentId: z.string().max(64).optional(),
+  clientId: z.string().max(64).optional(),
+  mine: z.enum(["1", "0"]).optional(),
+});
+
+export const approvalDecisionSchema = z.object({ comment: optionalText(5000) });
+/** Rejections and change requests must say why. */
+export const approvalReasonSchema = z.object({ comment: requiredText(5000) });
+
+const crStatus = z.enum(["DRAFT", "UNDER_REVIEW", "PENDING_CLIENT_APPROVAL", "APPROVED", "REJECTED", "IMPLEMENTED", "CANCELLED"]);
+
+const crFields = z.object({
+  title: requiredText(200),
+  description: optionalText(10000),
+  originalScope: optionalText(5000),
+  requestedChange: optionalText(5000),
+  impact: optionalText(5000),
+  estimatedHours: hours,
+  additionalCost: money,
+  priority: priority.default("MEDIUM"),
+  requestedBy: optionalText(120),
+});
+
+export const changeRequestCreateSchema = crFields.extend({ projectId: id });
+export const changeRequestUpdateSchema = crFields.partial();
+
+export const changeRequestListQuery = z.object({
+  q: z.string().max(100).optional(),
+  status: crStatus.optional(),
+  projectId: z.string().max(64).optional(),
+  clientId: z.string().max(64).optional(),
+});
+
+export const changeRequestDecisionSchema = z.object({
+  note: optionalText(5000),
+  /** Internal user recording a decision the client gave outside the app. */
+  onBehalf: checkbox.default(false),
+});
+export const changeRequestRejectSchema = z.object({ note: requiredText(5000), onBehalf: checkbox.default(false) });
+export const changeRequestCancelSchema = z.object({ reason: requiredText(2000) });
+
+export const implementationTasksSchema = z.object({
+  feature: z.object({ name: requiredText(160), phaseId: id }).nullish(),
+  tasks: z
+    .array(
+      z.object({
+        title: requiredText(200),
+        phaseId: id,
+        featureId: optionalId,
+        estimatedHours: hours,
+        assigneeId: optionalId,
+        dueDate: optionalDate,
+      }),
+    )
+    .min(1, "Add at least one task")
+    .max(25, "At most 25 tasks at once"),
+});

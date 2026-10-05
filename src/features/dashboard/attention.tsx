@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { AlertOctagon, AlertTriangle, Info } from "lucide-react";
 import type { AttentionItem } from "@/server/services/dashboard";
 import { EmptyState } from "@/components/ui/misc";

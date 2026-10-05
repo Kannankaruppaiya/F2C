@@ -1,16 +1,19 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { AlertOctagon, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { pageContext, load, moneyFmt } from "@/server/page-context";
 import { getProject } from "@/server/services/projects";
 import { listTasks } from "@/server/services/tasks";
 import { listActivity } from "@/server/services/activity";
-import { listApprovals, listChangeRequests } from "@/server/services/records";
+import { listApprovals } from "@/server/services/approvals";
+import { listChangeRequests } from "@/server/services/change-requests";
+import { getScopeSummary } from "@/server/services/scope";
 import { Panel } from "@/components/ui/panel";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { ProgressBar } from "@/components/ui/progress";
 import { AvatarName, EmptyState } from "@/components/ui/misc";
 import { Money } from "@/components/ui/money";
 import { ActivityFeed } from "@/features/activity/activity-feed";
+import { ScopeStrip } from "@/features/change-requests/scope-strip";
 import { cn } from "@/lib/cn";
 import { formatDate, formatHours, formatPercent, relativeDue } from "@/lib/format";
 import { APPROVAL_STATUS, CHANGE_REQUEST_STATUS, PHASE_STATUS, PRIORITY, PRIORITY_RANK, TASK_STATUS } from "@/lib/status";
@@ -20,10 +23,11 @@ export default async function ProjectOverviewPage({ params }: { params: Promise<
   const { projectId } = await params;
   const ctx = await pageContext();
   const { project, summary: s } = await load(() => getProject(ctx, projectId));
-  const [openTasks, approvals, crs, activity] = await Promise.all([
+  const [openTasks, approvals, crs, scope, activity] = await Promise.all([
     listTasks(ctx, { projectId, open: "1" }),
     listApprovals(ctx, { projectId }),
     listChangeRequests(ctx, { projectId }),
+    getScopeSummary(ctx, projectId),
     listActivity(ctx, { projectId, limit: 8 }),
   ]);
   const today = todayISO(ctx.timezone);
@@ -74,8 +78,9 @@ export default async function ProjectOverviewPage({ params }: { params: Promise<
           </div>
         </Panel>
 
-        <Panel title="What we're building" actions={<Link href={`/projects/${project.id}/scope`} className="text-xs text-accent hover:underline">Full scope</Link>} bodyClassName="px-4 py-3">
-          <p className="text-[13px] leading-relaxed text-ink-2">{project.description ?? <span className="text-ink-4">No description yet.</span>}</p>
+        <Panel title="What we're building" actions={<Link href={`/projects/${project.id}/scope`} className="text-xs text-accent hover:underline">Full scope</Link>}>
+          <p className="px-4 py-3 text-[13px] leading-relaxed text-ink-2">{project.description ?? <span className="text-ink-4">No description yet.</span>}</p>
+          <ScopeStrip scope={scope} fmt={fmt} showCost={f !== null || ctx.role === "CLIENT"} />
         </Panel>
 
         <Panel title="Phases" description={s.currentPhase ? `Currently in ${s.currentPhase.name}` : undefined} actions={<Link href={`/projects/${project.id}/phases`} className="text-xs text-accent hover:underline">Manage</Link>}>
@@ -238,7 +243,7 @@ export default async function ProjectOverviewPage({ params }: { params: Promise<
                 <li className="flex items-center justify-between gap-2 px-4 py-2.5 text-[13px]">
                   <span className="min-w-0">
                     <span className="block truncate">{lastApproved.title}</span>
-                    <span className="text-2xs text-ink-4">Approved by {lastApproved.decidedBy ?? "client"}</span>
+                    <span className="text-2xs text-ink-4">Approved by {lastApproved.respondedBy ?? "client"} · v{lastApproved.version.number}</span>
                   </span>
                   <StatusBadge defs={APPROVAL_STATUS} value="APPROVED" />
                 </li>
@@ -258,7 +263,7 @@ export default async function ProjectOverviewPage({ params }: { params: Promise<
                     <span className="min-w-0 truncate"><span className="font-mono text-2xs text-ink-4">{c.key}</span> {c.title}</span>
                     <StatusBadge defs={CHANGE_REQUEST_STATUS} value={c.status} />
                   </div>
-                  <p className="tabular text-2xs text-ink-4">+{c.additionalHours}h · <Money value={c.additionalCost} fmt={fmt} /></p>
+                  <p className="tabular text-2xs text-ink-4">+{c.estimatedHours}h · <Money value={c.additionalCost} fmt={fmt} /></p>
                 </li>
               ))}
             </ul>

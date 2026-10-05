@@ -8,6 +8,7 @@ export type ErrorCode =
   | "CONFLICT"
   | "RULE_VIOLATION"
   | "RATE_LIMITED"
+  | "PAYLOAD_TOO_LARGE"
   | "INTERNAL";
 
 const STATUS: Record<ErrorCode, number> = {
@@ -18,6 +19,7 @@ const STATUS: Record<ErrorCode, number> = {
   CONFLICT: 409,
   RULE_VIOLATION: 422,
   RATE_LIMITED: 429,
+  PAYLOAD_TOO_LARGE: 413,
   INTERNAL: 500,
 };
 

@@ -117,7 +117,7 @@ export async function getClient(ctx: AuthContext, id: string) {
   const [pendingApprovals, changeRequests] = await Promise.all([
     db.approval.count({ where: { clientId: id, workspaceId: ctx.workspaceId, status: "PENDING" } }),
     db.changeRequest.count({
-      where: { clientId: id, workspaceId: ctx.workspaceId, deletedAt: null, status: { in: ["PENDING_CLIENT_APPROVAL", "PENDING_INTERNAL_REVIEW"] } },
+      where: { clientId: id, workspaceId: ctx.workspaceId, deletedAt: null, status: { in: ["PENDING_CLIENT_APPROVAL", "UNDER_REVIEW"] } },
     }),
   ]);
   return {

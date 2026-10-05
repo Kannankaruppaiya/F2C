@@ -19,8 +19,12 @@ export const PERMISSIONS = [
   "bug.create",
   "bug.edit",
   "document.upload",
+  "document.manage",
   "document.approve",
+  "approval.request",
+  "changeRequest.request",
   "changeRequest.manage",
+  "changeRequest.decide",
   "finance.view",
   "invoice.create",
   "payment.record",
@@ -34,11 +38,13 @@ export const PERMISSIONS = [
 
 export type Permission = (typeof PERMISSIONS)[number];
 
-const DELIVERY: Permission[] = ["project.view", "task.create", "task.edit", "bug.create", "bug.edit", "document.upload", "time.log"];
+const DELIVERY: Permission[] = ["project.view", "task.create", "task.edit", "bug.create", "bug.edit", "document.upload", "changeRequest.request", "time.log"];
 
 const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
-  OWNER: PERMISSIONS,
-  ADMIN: PERMISSIONS.filter((p) => p !== "document.approve"),
+  // Approving documents and deciding change requests is the client's act; internal roles can
+  // only *record* an offline client decision on a change request (changeRequest.manage).
+  OWNER: PERMISSIONS.filter((p) => p !== "document.approve" && p !== "changeRequest.decide"),
+  ADMIN: PERMISSIONS.filter((p) => p !== "document.approve" && p !== "changeRequest.decide"),
   PROJECT_MANAGER: [
     ...DELIVERY,
     "project.create",
@@ -49,6 +55,8 @@ const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "feature.edit",
     "task.assign",
     "task.delete",
+    "document.manage",
+    "approval.request",
     "changeRequest.manage",
     "finance.view",
     "time.viewAll",
@@ -57,7 +65,7 @@ const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   DESIGNER: DELIVERY,
   QA: DELIVERY,
   FINANCE: ["project.view", "client.view", "finance.view", "invoice.create", "payment.record", "expense.manage", "time.viewAll"],
-  CLIENT: ["project.view", "bug.create", "document.approve"],
+  CLIENT: ["project.view", "bug.create", "document.approve", "changeRequest.request", "changeRequest.decide"],
 };
 
 const sets = Object.fromEntries(

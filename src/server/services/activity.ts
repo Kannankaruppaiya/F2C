@@ -10,7 +10,9 @@ export interface ActivityInput {
   action: string;
   summary: string;
   projectId?: string | null;
-  metadata?: Prisma.InputJsonValue;
+  metadata?: Record<string, Prisma.InputJsonValue | null>;
+  /** Client users only ever see activity explicitly marked client-visible. */
+  clientVisible?: boolean;
 }
 
 /** Append an audit record. There is intentionally no update/delete counterpart. */
@@ -24,7 +26,7 @@ export async function recordActivity(ctx: AuthContext, input: ActivityInput, tx:
       entityId: input.entityId,
       action: input.action,
       summary: input.summary,
-      metadata: input.metadata,
+      metadata: input.clientVisible || input.metadata ? { ...(input.metadata ?? {}), ...(input.clientVisible ? { clientVisible: true } : {}) } : undefined,
     },
   });
 }
@@ -53,11 +55,23 @@ export interface ActivityItem {
 
 export async function listActivity(
   ctx: AuthContext,
-  opts: { projectId?: string; clientId?: string; entity?: { type: string; id: string }; limit?: number } = {},
+  opts: {
+    projectId?: string;
+    clientId?: string;
+    entity?: { type: string; id: string };
+    /** Document timeline: the document's own events plus its approvals'. */
+    documentId?: string;
+    limit?: number;
+  } = {},
 ): Promise<ActivityItem[]> {
   const where: Prisma.ActivityWhereInput = { workspaceId: ctx.workspaceId };
   if (opts.projectId) where.projectId = opts.projectId;
   if (opts.entity) Object.assign(where, { entityType: opts.entity.type, entityId: opts.entity.id });
+  const and: Prisma.ActivityWhereInput[] = [];
+  if (opts.documentId) {
+    and.push({ OR: [{ entityType: "document", entityId: opts.documentId }, { metadata: { path: ["documentId"], equals: opts.documentId } }] });
+  }
+  if (ctx.role === "CLIENT") and.push({ metadata: { path: ["clientVisible"], equals: true } });
   if (opts.clientId) {
     where.OR = [{ project: { clientId: opts.clientId } }, { entityType: "client", entityId: opts.clientId }];
   }
@@ -73,6 +87,7 @@ export async function listActivity(
     }
   }
 
+  if (and.length) where.AND = and;
   const rows = await db.activity.findMany({
     where,
     orderBy: { createdAt: "desc" },

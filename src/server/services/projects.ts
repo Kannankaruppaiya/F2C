@@ -211,7 +211,7 @@ export async function updateProject(ctx: AuthContext, id: string, input: z.input
         summary: statusChanged
           ? `${project.name} moved to ${PROJECT_STATUS[data.status!].label}`
           : `Project ${project.name} details updated`,
-        metadata: statusChanged ? { from: existing.status, to: data.status } : undefined,
+        metadata: statusChanged ? { from: existing.status, to: data.status! } : undefined,
       },
       tx,
     );

@@ -182,36 +182,47 @@ export async function createTask(ctx: AuthContext, input: z.input<typeof taskCre
   requirePermission(ctx, "task.create");
   const data = taskCreateSchema.parse(input);
   if (!canAssign(ctx, data.assigneeId)) throw forbidden("You can only assign tasks to yourself");
-  const project = await assertProjectAccess(ctx, data.projectId);
-  return db.$transaction(async (tx) => {
-    let phaseId = data.phaseId;
-    // A task under a feature always lives in that feature's phase.
-    if (data.featureId) {
-      const f = await tx.feature.findFirst({ where: { id: data.featureId, projectId: data.projectId, deletedAt: null }, select: { phaseId: true } });
-      if (f) phaseId = f.phaseId;
-    }
-    await validateRefs(tx, ctx, data.projectId, { phaseId, featureId: data.featureId, assigneeId: data.assigneeId });
-    const number = await nextNumber(tx, ctx.workspaceId, "task");
-    const { dependsOnIds, dueDate, ...rest } = data;
-    const task = await tx.task.create({
-      data: {
-        ...rest,
-        phaseId,
-        number,
-        dueDate: dueDate ? parseISODate(dueDate) : null,
-        workspaceId: ctx.workspaceId,
-        createdById: ctx.userId,
-        completedAt: data.status === "DONE" ? new Date() : null,
-      },
-    });
-    await setDependencies(tx, data.projectId, task.id, dependsOnIds);
-    await recordActivity(
-      ctx,
-      { entityType: "task", entityId: task.id, projectId: project.id, action: "task.created", summary: `Task ${taskKey(number)} "${task.title}" created` },
-      tx,
-    );
-    return task;
+  await assertProjectAccess(ctx, data.projectId);
+  return db.$transaction((tx) => createTaskInTx(tx, ctx, data));
+}
+
+/**
+ * Task creation core, run inside a caller-owned transaction. Shared by the task form and by
+ * change-request implementation tasks so both enforce identical rules. Caller must have checked
+ * permissions and project access.
+ */
+export async function createTaskInTx(
+  tx: Tx,
+  ctx: AuthContext,
+  data: z.output<typeof taskCreateSchema> & { changeRequestId?: string | null },
+) {
+  let phaseId = data.phaseId;
+  // A task under a feature always lives in that feature's phase.
+  if (data.featureId) {
+    const f = await tx.feature.findFirst({ where: { id: data.featureId, projectId: data.projectId, deletedAt: null }, select: { phaseId: true } });
+    if (f) phaseId = f.phaseId;
+  }
+  await validateRefs(tx, ctx, data.projectId, { phaseId, featureId: data.featureId, assigneeId: data.assigneeId });
+  const number = await nextNumber(tx, ctx.workspaceId, "task");
+  const { dependsOnIds, dueDate, ...rest } = data;
+  const task = await tx.task.create({
+    data: {
+      ...rest,
+      phaseId,
+      number,
+      dueDate: dueDate ? parseISODate(dueDate) : null,
+      workspaceId: ctx.workspaceId,
+      createdById: ctx.userId,
+      completedAt: data.status === "DONE" ? new Date() : null,
+    },
   });
+  await setDependencies(tx, data.projectId, task.id, dependsOnIds);
+  await recordActivity(
+    ctx,
+    { entityType: "task", entityId: task.id, projectId: data.projectId, action: "task.created", summary: `Task ${taskKey(number)} "${task.title}" created` },
+    tx,
+  );
+  return task;
 }
 
 async function getTaskRow(ctx: AuthContext, id: string) {

@@ -14,6 +14,7 @@ import type {
   Role,
   TaskStatus,
   DocumentStatus,
+  DocumentCategory,
   DeploymentStatus,
   HandoverItemStatus,
 } from "@prisma/client";
@@ -128,11 +129,12 @@ export const APPROVAL_STATUS: Defs<ApprovalStatus> = {
   APPROVED: { label: "Approved", tone: "green" },
   REJECTED: { label: "Rejected", tone: "red" },
   CHANGES_REQUESTED: { label: "Changes Requested", tone: "violet" },
+  CANCELLED: { label: "Cancelled", tone: "muted" },
 };
 
 export const CHANGE_REQUEST_STATUS: Defs<ChangeRequestStatus> = {
   DRAFT: { label: "Draft", tone: "muted" },
-  PENDING_INTERNAL_REVIEW: { label: "Internal Review", tone: "neutral" },
+  UNDER_REVIEW: { label: "Under Review", tone: "neutral" },
   PENDING_CLIENT_APPROVAL: { label: "Pending Client", tone: "amber" },
   APPROVED: { label: "Approved", tone: "green" },
   REJECTED: { label: "Rejected", tone: "red" },
@@ -147,6 +149,22 @@ export const DOCUMENT_STATUS: Defs<DocumentStatus> = {
   APPROVED: { label: "Approved", tone: "green" },
   REJECTED: { label: "Rejected", tone: "red" },
   ARCHIVED: { label: "Archived", tone: "muted" },
+};
+
+export const DOCUMENT_CATEGORY: Record<DocumentCategory, string> = {
+  REQUIREMENTS: "Requirements",
+  PROPOSAL: "Proposal",
+  SCOPE: "Scope",
+  UI_UX: "UI/UX",
+  TECHNICAL: "Technical",
+  API: "API",
+  DATABASE: "Database",
+  QA: "QA",
+  APPROVAL: "Approval",
+  INVOICE: "Invoice",
+  DEPLOYMENT: "Deployment",
+  HANDOVER: "Handover",
+  OTHER: "Other",
 };
 
 export const DEPLOYMENT_STATUS: Defs<DeploymentStatus> = {

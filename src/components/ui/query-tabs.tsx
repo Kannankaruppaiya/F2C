@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { cn } from "@/lib/cn";
 
 /** Server-rendered tabs driven by a ?tab= query param. */

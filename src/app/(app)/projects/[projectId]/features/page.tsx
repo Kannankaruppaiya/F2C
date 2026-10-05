@@ -3,11 +3,12 @@ import { can } from "@/server/authz/context";
 import { listFeatures } from "@/server/services/features";
 import { getProject } from "@/server/services/projects";
 import { FeatureManager } from "@/features/projects/feature-manager";
+import { listApprovedChangeRequests } from "@/server/services/change-requests";
 
 export default async function FeaturesPage({ params, searchParams }: { params: Promise<{ projectId: string }>; searchParams: Promise<{ new?: string }> }) {
   const [{ projectId }, sp] = await Promise.all([params, searchParams]);
   const ctx = await pageContext();
-  const [{ summary }, features] = await load(() => Promise.all([getProject(ctx, projectId), listFeatures(ctx, projectId)]));
+  const [{ summary }, features, changeRequests] = await load(() => Promise.all([getProject(ctx, projectId), listFeatures(ctx, projectId), listApprovedChangeRequests(ctx, projectId)]));
   return (
     <FeatureManager
       projectId={projectId}
@@ -16,6 +17,7 @@ export default async function FeaturesPage({ params, searchParams }: { params: P
       canEdit={can(ctx, "feature.edit")}
       canVerify={can(ctx, "task.edit")}
       openNew={sp.new === "1"}
+      changeRequests={changeRequests}
     />
   );
 }
